@@ -1,36 +1,116 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Kapo Presupuestos
 
-## Getting Started
+Sistema de gestión de presupuestos construido con Next.js 16, React 19, TypeScript y GraphQL.
 
-First, run the development server:
+## 🚀 Características
+
+- ⚡️ Next.js 16 con App Router
+- 🎨 Tailwind CSS 4 para estilos
+- 🔐 Autenticación con JWT y refresh tokens
+- 📡 GraphQL con Apollo Client
+- 🎯 TypeScript para type safety
+- 🔄 React Query para gestión de estado del servidor
+- 🎭 Componentes UI reutilizables
+- 📱 Diseño responsive
+
+## 📁 Estructura del Proyecto
+
+```
+kapo-presupuestos/
+├── src/
+│   ├── app/                    # Rutas de Next.js
+│   │   ├── (auth)/             # Rutas de autenticación
+│   │   ├── (dashboard)/        # Rutas del dashboard
+│   │   ├── layout.tsx          # Layout principal
+│   │   └── page.tsx            # Página de inicio
+│   ├── components/             # Componentes React
+│   │   ├── common/             # Componentes comunes
+│   │   ├── layout/             # Componentes de layout
+│   │   └── ui/                 # Componentes UI base
+│   ├── context/                # Contextos de React
+│   │   └── auth-context.tsx    # Contexto de autenticación
+│   ├── hooks/                  # Custom hooks
+│   ├── lib/                    # Utilidades y helpers
+│   │   ├── constants/         # Constantes de la app
+│   │   ├── cookies.ts          # Utilidades de cookies
+│   │   └── utils.ts            # Utilidades generales
+│   ├── providers/              # Providers de React
+│   │   └── providers.tsx      # Provider principal
+│   ├── services/               # Servicios
+│   │   ├── auth-service.ts    # Servicio de autenticación
+│   │   └── graphql-client.ts  # Cliente GraphQL
+│   ├── types/                  # Tipos TypeScript
+│   └── graphql/                # Queries y mutations GraphQL
+├── public/                     # Archivos estáticos
+└── package.json
+```
+
+## 🛠️ Instalación
+
+1. Instala las dependencias:
+
+```bash
+npm install
+```
+
+2. Crea un archivo `.env.local` en la raíz del proyecto:
+
+```env
+NEXT_PUBLIC_GRAPHQL_URL=http://localhost:4000/graphql
+```
+
+3. Ejecuta el servidor de desarrollo:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+4. Abre [http://localhost:3000](http://localhost:3000) en tu navegador.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 📝 Scripts Disponibles
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `npm run dev` - Inicia el servidor de desarrollo
+- `npm run build` - Construye la aplicación para producción
+- `npm run start` - Inicia el servidor de producción
+- `npm run lint` - Ejecuta el linter
 
-## Learn More
+## 🏗️ Arquitectura
 
-To learn more about Next.js, take a look at the following resources:
+El proyecto sigue una arquitectura limpia y modular:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- **App Router**: Usa el nuevo App Router de Next.js 16
+- **Grupos de Rutas**: Organización con `(auth)` y `(dashboard)`
+- **Context API**: Para estado global (autenticación)
+- **React Query**: Para gestión de datos del servidor
+- **Services**: Lógica de negocio separada
+- **TypeScript**: Type safety en toda la aplicación
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 🔐 Autenticación
 
-## Deploy on Vercel
+El sistema incluye:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Login con usuario y contraseña
+- Refresh tokens automático
+- Validación de tokens
+- Protección de rutas privadas
+- Manejo de sesiones
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 🎨 Componentes UI
+
+Los componentes UI están basados en shadcn/ui y son completamente personalizables:
+
+- Button
+- Input
+- (Más componentes se pueden agregar según necesidad)
+
+## 📚 Próximos Pasos
+
+- [ ] Agregar más componentes UI
+- [ ] Implementar gestión de presupuestos
+- [ ] Agregar tests
+- [ ] Configurar CI/CD
+- [ ] Documentación de API
+
+## 📄 Licencia
+
+MIT
