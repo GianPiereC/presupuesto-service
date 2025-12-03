@@ -1,26 +1,321 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Colores base */
+  --background: rgb(255, 255, 255);
+  --foreground: rgb(23, 23, 23);
+  
+  /* Colores de superficie */
+  --sidebar-bg: rgb(255, 255, 255);
+  --header-bg: rgb(255, 255, 255);
+  --content-bg: rgb(247, 247, 247);
+  --card-bg: rgb(255, 255, 255);
+  
+  /* Colores de bordes y estados */
+  --border-color: rgb(229, 231, 235);
+  --hover-bg: rgb(247, 247, 247);
+  --active-bg: rgb(229, 231, 235);
+  
+  /* Colores de texto */
+  --text-primary: rgb(92, 92, 92);
+  --text-secondary: rgb(75, 85, 99);
+  --text-on-content-bg: rgb(31, 41, 55);
+  --text-on-content-bg-heading: rgb(17, 24, 39);
+  
+  /* Colores del sistema */
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f5f9;
+  --secondary-foreground: #0f172a;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --accent: #f1f5f9;
+  --accent-foreground: #0f172a;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #e2e8f0;
+  --input: #e2e8f0;
+  --ring: #2563eb;
+  --radius: 0.5rem;
+  
+  /* Variables de skeleton */
+  --skeleton-bg: rgb(229, 231, 235);
+  
+  /* Colores para ruta activa en sidebar */
+  --sidebar-active-bg: #41506e;
+  --sidebar-active-text: #ffffff;
+  --sidebar-active-icon: #b2beda;
+  --sidebar-active-border: #263043;
+  --sidebar-active-bg-light: rgba(65, 80, 110, 0.08);
+  --sidebar-active-text-light: #4a5c7a;
+}
+
+.dark {
+  /* Colores base */
+  --background: rgb(26, 28, 30);
+  --foreground: rgb(255, 255, 255);
+  
+  /* Colores de superficie */
+  --sidebar-bg: rgb(26, 28, 30);
+  --header-bg: rgb(26, 28, 30);
+  --content-bg: rgba(252, 252, 252, 0.055);
+  --card-bg: rgb(26, 28, 30);
+  
+  /* Colores de bordes y estados */
+  --border-color: rgb(45, 47, 49);
+  --hover-bg: rgb(45, 47, 49);
+  --active-bg: rgb(61, 63, 65);
+  
+  /* Colores de texto */
+  --text-primary: rgb(255, 255, 255);
+  --text-secondary: rgb(231, 231, 231);
+  --text-on-content-bg: rgb(209, 213, 219);
+  --text-on-content-bg-heading: rgb(229, 231, 235);
+  
+  /* Colores del sistema */
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
+  --secondary: #1e293b;
+  --secondary-foreground: #f1f5f9;
+  --muted: #1e293b;
+  --muted-foreground: #94a3b8;
+  --accent: #1e293b;
+  --accent-foreground: #f1f5f9;
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --border: #334155;
+  --input: #334155;
+  --ring: #3b82f6;
+  
+  /* Variables de skeleton */
+  --skeleton-bg: rgb(45, 47, 49);
+  
+  /* Colores para ruta activa en sidebar */
+  --sidebar-active-bg: #41506e;
+  --sidebar-active-text: #ffffff;
+  --sidebar-active-icon: #b2beda;
+  --sidebar-active-border: #263043;
+  --sidebar-active-bg-light: rgba(65, 80, 110, 0.15);
+  --sidebar-active-text-light: #9fb3d1;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  /* Variables personalizadas para uso canónico */
+  --color-card-bg: var(--card-bg);
+  --color-border-color: var(--border-color);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  border-color: var(--border);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: inherit;
+  line-height: 1.5rem;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Cursor pointer para todos los botones por defecto */
+button:not(:disabled):not([disabled]) {
+  cursor: pointer;
+}
+
+/* Los botones deshabilitados mantienen cursor-not-allowed */
+button:disabled,
+button[disabled] {
+  cursor: not-allowed;
+}
+
+/* Estilos de la barra de desplazamiento */
+html, body {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) var(--background);
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+html::-webkit-scrollbar-track,
+body::-webkit-scrollbar-track,
+*::-webkit-scrollbar-track {
+  background: var(--background);
+}
+
+html::-webkit-scrollbar-thumb,
+body::-webkit-scrollbar-thumb,
+*::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+  transition: background-color 0.3s ease;
+}
+
+html::-webkit-scrollbar-thumb:hover,
+body::-webkit-scrollbar-thumb:hover,
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--hover-bg);
+}
+
+/* Prevenir cualquier transformación de color en el logo */
+.logo-no-color-change {
+  filter: none !important;
+  -webkit-filter: none !important;
+  color-scheme: normal !important;
+}
+
+/* Estilos modernos con sombras sutiles - Estilo Windows */
+.card-shadow {
+  box-shadow: 
+    0 2px 6px rgba(0, 0, 0, 0.12),
+    0 1px 3px rgba(0, 0, 0, 0.08),
+    0 0 1px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.dark .card-shadow {
+  box-shadow: 
+    0 4px 8px rgba(0, 0, 0, 0.4),
+    0 2px 4px rgba(0, 0, 0, 0.3),
+    0 1px 2px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.card-shadow-hover {
+  box-shadow: 
+    0 2px 6px rgba(0, 0, 0, 0.11),
+    0 1px 3px rgba(0, 0, 0, 0.07),
+    0 0 1px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  transition: all 0.2s ease;
+}
+
+.dark .card-shadow-hover {
+  box-shadow: 
+    0 4px 8px rgba(0, 0, 0, 0.4),
+    0 2px 4px rgba(0, 0, 0, 0.3),
+    0 1px 2px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.card-shadow-hover:hover {
+  box-shadow: 
+    0 6px 16px rgba(0, 0, 0, 0.12),
+    0 3px 6px rgba(0, 0, 0, 0.08),
+    0 1px 2px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transform: translateY(-0.5px);
+}
+
+.dark .card-shadow-hover:hover {
+  box-shadow: 
+    0 8px 20px rgba(0, 0, 0, 0.5),
+    0 4px 8px rgba(0, 0, 0, 0.4),
+    0 2px 4px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transform: translateY(-0.5px);
+}
+
+/* Ocultar spinners (flechas) de inputs number por defecto */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* Clase para mostrar spinners cuando se necesite específicamente */
+input[type="number"].show-spinner::-webkit-inner-spin-button,
+input[type="number"].show-spinner::-webkit-outer-spin-button {
+  -webkit-appearance: auto;
+  appearance: auto;
+  margin: 0;
+}
+
+input[type="number"].show-spinner {
+  -moz-appearance: number-input;
+  appearance: number-input;
+}
+
+/* Estilos mejorados para elementos del sidebar */
+.sidebar-nav-item {
+  position: relative;
+}
+
+.sidebar-nav-item-active {
+  box-shadow: 
+    0 2px 6px rgba(0, 0, 0, 0.12),
+    0 1px 3px rgba(0, 0, 0, 0.08),
+    0 0 1px rgba(0, 0, 0, 0.06);
+  animation: sidebar-active-pulse 3s ease-in-out infinite;
+}
+
+@keyframes sidebar-active-pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.002);
+  }
+}
+
+.dark .sidebar-nav-item-active {
+  box-shadow: 
+    0 4px 8px rgba(0, 0, 0, 0.4),
+    0 2px 4px rgba(0, 0, 0, 0.3),
+    0 1px 2px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-nav-item:hover:not(.sidebar-nav-item-active) {
+  box-shadow: 
+    0 1px 3px rgba(0, 0, 0, 0.08),
+    0 0 1px rgba(0, 0, 0, 0.04);
+  transform: translateX(2px);
+}
+
+.dark .sidebar-nav-item:hover:not(.sidebar-nav-item-active) {
+  box-shadow: 
+    0 2px 4px rgba(0, 0, 0, 0.3),
+    0 1px 2px rgba(0, 0, 0, 0.2);
+  transform: translateX(2px);
+}
+
+/* Sombras sutiles para headers de tabla */
+.table-header-shadow {
+  box-shadow: 
+    0 1px 2px rgba(0, 0, 0, 0.06),
+    0 0 1px rgba(0, 0, 0, 0.04);
+}
+
+.dark .table-header-shadow {
+  box-shadow: 
+    0 1px 3px rgba(0, 0, 0, 0.2),
+    0 0 1px rgba(0, 0, 0, 0.15);
 }
