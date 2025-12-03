@@ -4,6 +4,7 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation';
 import { Plus, ChevronDown, ChevronRight, ChevronLeft, ArrowUp, ArrowDown, Scissors, Clipboard, ArrowLeft, Trash2, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { LoadingSpinner } from '@/components/ui';
 import Modal from '@/components/ui/modal';
 import CrearPartidasTitulosForm from './components/CrearPartidasTitulosForm';
 import DetallePartidaPanel from './components/DetallePartidaPanel';
@@ -1997,9 +1998,7 @@ export default function EstructuraPresupuestoEditor({
   if (isLoading) {
     return (
       <div className="bg-[var(--background)] backdrop-blur-sm rounded-lg border border-[var(--border-color)] p-8">
-        <div className="text-center">
-          <p className="text-sm text-[var(--text-secondary)]">Cargando estructura del presupuesto...</p>
-        </div>
+        <LoadingSpinner size={80} showText={true} text="Cargando estructura del presupuesto..." />
       </div>
     );
   }

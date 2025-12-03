@@ -3,6 +3,7 @@
 import { use, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { LoadingSpinner } from '@/components/ui';
 import { usePresupuesto } from '@/hooks';
 import EstructuraPresupuestoEditor from '@/components/presupuesto/EstructuraPresupuestoEditor';
 
@@ -14,8 +15,8 @@ function EstructuraContentWrapper({ id_proyecto }: { id_proyecto: string }) {
   return (
     <Suspense fallback={
       <div className="space-y-3">
-        <div className="bg-[var(--background)] backdrop-blur-sm rounded-lg shadow-lg shadow-black/4 border border-[var(--border-color)] p-12 text-center">
-          <p className="text-xs text-[var(--text-secondary)]">Cargando estructura...</p>
+        <div className="bg-[var(--background)] backdrop-blur-sm rounded-lg shadow-lg shadow-black/4 border border-[var(--border-color)] p-12">
+          <LoadingSpinner size={80} showText={true} text="Cargando estructura..." />
         </div>
       </div>
     }>
@@ -33,8 +34,8 @@ function EstructuraContent({ id_proyecto }: { id_proyecto: string }) {
   if (isLoadingPresupuesto) {
     return (
       <div className="space-y-3">
-        <div className="bg-[var(--background)] backdrop-blur-sm rounded-lg shadow-lg shadow-black/4 border border-[var(--border-color)] p-12 text-center">
-          <p className="text-xs text-[var(--text-secondary)]">Cargando estructura...</p>
+        <div className="bg-[var(--background)] backdrop-blur-sm rounded-lg shadow-lg shadow-black/4 border border-[var(--border-color)] p-12">
+          <LoadingSpinner size={80} showText={true} text="Cargando estructura..." />
         </div>
       </div>
     );

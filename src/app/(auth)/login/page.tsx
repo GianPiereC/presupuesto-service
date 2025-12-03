@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/hooks';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { LoadingSpinner } from '@/components/ui';
 import toast from 'react-hot-toast';
 
 function LoginForm() {
@@ -94,8 +95,8 @@ export default function LoginPage() {
       <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
         <div className="w-full max-w-md space-y-8 rounded-lg bg-white p-8 shadow-md">
           <div className="text-center">
-            <h2 className="text-3xl font-bold text-gray-900">Kapo Presupuestos</h2>
-            <p className="mt-2 text-sm text-gray-600">Cargando...</p>
+            <h2 className="text-3xl font-bold text-gray-900 mb-4">Kapo Presupuestos</h2>
+            <LoadingSpinner size={80} showText={true} text="Cargando..." />
           </div>
         </div>
       </div>
