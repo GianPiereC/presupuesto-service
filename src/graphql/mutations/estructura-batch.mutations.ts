@@ -29,7 +29,6 @@ export const BATCH_ESTRUCTURA_PRESUPUESTO_MUTATION = `
         id_partida_padre
         nivel_partida
         numero_item
-        codigo_partida
         descripcion
         unidad_medida
         metrado
@@ -60,7 +59,6 @@ export const BATCH_ESTRUCTURA_PRESUPUESTO_MUTATION = `
         id_partida_padre
         nivel_partida
         numero_item
-        codigo_partida
         descripcion
         unidad_medida
         metrado

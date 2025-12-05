@@ -34,6 +34,7 @@ export const CREATE_APU_MUTATION = `
       recursos {
         id_recurso_apu
         recurso_id
+        id_partida_subpartida
         codigo_recurso
         descripcion
         unidad_medida
@@ -45,6 +46,9 @@ export const CREATE_APU_MUTATION = `
         desperdicio_porcentaje
         cantidad_con_desperdicio
         parcial
+        precio_unitario_subpartida
+        tiene_precio_override
+        precio_override
         orden
       }
     }
@@ -77,6 +81,7 @@ export const UPDATE_APU_MUTATION = `
       recursos {
         id_recurso_apu
         recurso_id
+        id_partida_subpartida
         codigo_recurso
         descripcion
         unidad_medida
@@ -88,6 +93,9 @@ export const UPDATE_APU_MUTATION = `
         desperdicio_porcentaje
         cantidad_con_desperdicio
         parcial
+        precio_unitario_subpartida
+        tiene_precio_override
+        precio_override
         orden
       }
     }
@@ -117,6 +125,7 @@ export const ADD_RECURSO_TO_APU_MUTATION = `
       recursos {
         id_recurso_apu
         recurso_id
+        id_partida_subpartida
         codigo_recurso
         descripcion
         unidad_medida
@@ -128,6 +137,9 @@ export const ADD_RECURSO_TO_APU_MUTATION = `
         desperdicio_porcentaje
         cantidad_con_desperdicio
         parcial
+        precio_unitario_subpartida
+        tiene_precio_override
+        precio_override
         orden
       }
     }
@@ -159,6 +171,7 @@ export const UPDATE_RECURSO_IN_APU_MUTATION = `
       recursos {
         id_recurso_apu
         recurso_id
+        id_partida_subpartida
         codigo_recurso
         descripcion
         unidad_medida
@@ -170,6 +183,9 @@ export const UPDATE_RECURSO_IN_APU_MUTATION = `
         desperdicio_porcentaje
         cantidad_con_desperdicio
         parcial
+        precio_unitario_subpartida
+        tiene_precio_override
+        precio_override
         orden
       }
     }
@@ -199,6 +215,7 @@ export const REMOVE_RECURSO_FROM_APU_MUTATION = `
       recursos {
         id_recurso_apu
         recurso_id
+        id_partida_subpartida
         codigo_recurso
         descripcion
         unidad_medida
@@ -210,8 +227,38 @@ export const REMOVE_RECURSO_FROM_APU_MUTATION = `
         desperdicio_porcentaje
         cantidad_con_desperdicio
         parcial
+        precio_unitario_subpartida
+        tiene_precio_override
+        precio_override
         orden
       }
+    }
+  }
+`;
+
+export const CREAR_PARTIDAS_SUBPARTIDAS_Y_APUS_MUTATION = `
+  mutation CrearPartidasSubpartidasYAPUs(
+    $subpartidas: [SubpartidaCreateInput!]!
+  ) {
+    crearPartidasSubpartidasYAPUs(
+      subpartidas: $subpartidas
+    ) {
+      mapeo {
+        temp_id
+        id_partida_real
+      }
+    }
+  }
+`;
+
+export const DELETE_APU_MUTATION = `
+  mutation DeleteApu($id_apu: String!) {
+    deleteApu(id_apu: $id_apu) {
+      _id
+      id_apu
+      id_partida
+      id_presupuesto
+      id_proyecto
     }
   }
 `;

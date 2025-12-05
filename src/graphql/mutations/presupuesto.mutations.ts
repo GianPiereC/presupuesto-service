@@ -327,3 +327,29 @@ export const ENVIAR_VERSION_META_A_APROBACION_MUTATION = `
   }
 `;
 
+export const ENVIAR_VERSION_META_A_OFICIALIZACION_MUTATION = `
+  mutation EnviarVersionMetaAOficializacion(
+    $id_presupuesto_meta: String!
+    $usuario_solicitante_id: String!
+    $comentario: String
+  ) {
+    enviarVersionMetaAOficializacion(
+      id_presupuesto_meta: $id_presupuesto_meta
+      usuario_solicitante_id: $usuario_solicitante_id
+      comentario: $comentario
+    ) {
+      id_aprobacion
+      id_presupuesto
+      id_grupo_version
+      id_proyecto
+      tipo_aprobacion
+      usuario_solicitante_id
+      estado
+      fecha_solicitud
+      comentario_solicitud
+      version_presupuesto
+      monto_presupuesto
+    }
+  }
+`;
+

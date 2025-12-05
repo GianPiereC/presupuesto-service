@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '@/hooks';
+import { useAuth } from '@/context/auth-context';
 import { LoadingSpinner } from '@/components/ui';
 
 interface PrivateRouteProps {

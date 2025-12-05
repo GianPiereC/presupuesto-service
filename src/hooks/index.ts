@@ -37,6 +37,7 @@ export {
   usePasarAContractual,
   useCrearPresupuestoMetaDesdeContractual,
   useEnviarVersionMetaAAprobacion,
+  useEnviarVersionMetaAOficializacion,
   useUpdatePresupuestoPadre,
   useEliminarGrupoPresupuestoCompleto,
   type Presupuesto,

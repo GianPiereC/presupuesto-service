@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { executeQuery, executeMutation } from '@/services/graphql-client';
 import { GET_PRESUPUESTOS_BY_PROYECTO_QUERY, GET_PRESUPUESTO_QUERY, GET_ESTRUCTURA_PRESUPUESTO_QUERY, GET_PRESUPUESTOS_POR_FASE_QUERY } from '@/graphql/queries/presupuesto.queries';
-import { ADD_PRESUPUESTO_MUTATION, UPDATE_PRESUPUESTO_MUTATION, DELETE_PRESUPUESTO_MUTATION, CREAR_PRESUPUESTO_PADRE_MUTATION, CREAR_VERSION_DESDE_PADRE_MUTATION, CREAR_VERSION_DESDE_VERSION_MUTATION, ENVIAR_A_LICITACION_MUTATION, PASAR_A_CONTRACTUAL_MUTATION, CREAR_PRESUPUESTO_META_DESDE_CONTRACTUAL_MUTATION, ACTUALIZAR_PRESUPUESTO_PADRE_MUTATION, ELIMINAR_GRUPO_PRESUPUESTO_COMPLETO_MUTATION, ENVIAR_VERSION_META_A_APROBACION_MUTATION } from '@/graphql/mutations/presupuesto.mutations';
+import { ADD_PRESUPUESTO_MUTATION, UPDATE_PRESUPUESTO_MUTATION, DELETE_PRESUPUESTO_MUTATION, CREAR_PRESUPUESTO_PADRE_MUTATION, CREAR_VERSION_DESDE_PADRE_MUTATION, CREAR_VERSION_DESDE_VERSION_MUTATION, ENVIAR_A_LICITACION_MUTATION, PASAR_A_CONTRACTUAL_MUTATION, CREAR_PRESUPUESTO_META_DESDE_CONTRACTUAL_MUTATION, ACTUALIZAR_PRESUPUESTO_PADRE_MUTATION, ELIMINAR_GRUPO_PRESUPUESTO_COMPLETO_MUTATION, ENVIAR_VERSION_META_A_APROBACION_MUTATION, ENVIAR_VERSION_META_A_OFICIALIZACION_MUTATION } from '@/graphql/mutations/presupuesto.mutations';
 import { useAuth } from '@/context/auth-context';
 import toast from 'react-hot-toast';
 
@@ -33,7 +33,7 @@ export interface Presupuesto {
   version_licitacion_aprobada?: number;
   estado?: 'borrador' | 'en_revision' | 'aprobado' | 'rechazado' | 'vigente';
   estado_aprobacion?: {
-    tipo: 'LICITACION_A_CONTRACTUAL' | 'CONTRACTUAL_A_META' | 'NUEVA_VERSION_META' | null;
+    tipo: 'LICITACION_A_CONTRACTUAL' | 'CONTRACTUAL_A_META' | 'NUEVA_VERSION_META' | 'OFICIALIZAR_META' | null;
     estado: 'PENDIENTE' | 'APROBADO' | 'RECHAZADO' | null;
     id_aprobacion?: string;
   };
@@ -160,7 +160,6 @@ export interface PartidaEstructura {
   id_partida_padre: string | null;
   nivel_partida: number;
   numero_item: string;
-  codigo_partida: string;
   descripcion: string;
   unidad_medida: string;
   metrado: number;
@@ -497,6 +496,53 @@ export function useEnviarVersionMetaAAprobacion() {
     },
     onError: (error: any) => {
       toast.error(error?.message || 'Error al enviar versión a aprobación');
+    },
+  });
+}
+
+/**
+ * Hook para enviar versión META aprobada a oficialización (poner en vigencia)
+ */
+export function useEnviarVersionMetaAOficializacion() {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+
+  return useMutation({
+    mutationFn: async (input: { id_presupuesto_meta: string; comentario?: string }) => {
+      if (!user?.id) {
+        throw new Error('Usuario no autenticado');
+      }
+      const response = await executeMutation<{ 
+        enviarVersionMetaAOficializacion: {
+          id_aprobacion: string;
+          id_presupuesto: string;
+          id_grupo_version: string;
+          id_proyecto: string;
+          tipo_aprobacion: string;
+          usuario_solicitante_id: string;
+          estado: string;
+          fecha_solicitud: string;
+          comentario_solicitud?: string;
+          version_presupuesto?: number;
+          monto_presupuesto?: number;
+        }
+      }>(ENVIAR_VERSION_META_A_OFICIALIZACION_MUTATION, {
+        id_presupuesto_meta: input.id_presupuesto_meta,
+        usuario_solicitante_id: user.id,
+        comentario: input.comentario,
+      });
+      return response.enviarVersionMetaAOficializacion;
+    },
+    onSuccess: (data) => {
+      // Invalidar queries de presupuestos META y aprobaciones
+      queryClient.invalidateQueries({ queryKey: ['presupuestos', 'fase', 'META'] });
+      queryClient.invalidateQueries({ queryKey: ['presupuestos', 'proyecto', data.id_proyecto] });
+      queryClient.invalidateQueries({ queryKey: ['presupuestos'] });
+      queryClient.invalidateQueries({ queryKey: ['aprobaciones'] });
+      toast.success('Versión enviada a oficialización exitosamente');
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Error al enviar versión a oficialización');
     },
   });
 }

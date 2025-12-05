@@ -50,7 +50,9 @@ export interface Apu {
 }
 
 export interface RecursoApuInput {
-  recurso_id: string;
+  recurso_id?: string; // Opcional si es subpartida
+  id_partida_subpartida?: string; // Opcional: ID de partida si es subpartida
+  precio_unitario_subpartida?: number; // Opcional: precio unitario si es subpartida
   codigo_recurso: string;
   descripcion: string;
   unidad_medida: string;
@@ -58,6 +60,8 @@ export interface RecursoApuInput {
   tipo_recurso_codigo?: string;
   id_precio_recurso?: string | null; // Se asigna automáticamente en el backend
   precio_usuario: number; // Precio que el usuario ingresa
+  tiene_precio_override?: boolean; // Indica si este recurso usa precio único
+  precio_override?: number; // Precio único (solo se usa si tiene_precio_override = true)
   cuadrilla?: number;
   cantidad: number;
   desperdicio_porcentaje: number;

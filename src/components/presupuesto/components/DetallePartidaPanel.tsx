@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { Plus, Trash2, Save, Loader2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,13 +19,33 @@ import {
 import { useUpdatePartida } from '@/hooks/usePartidas';
 import { mapearTipoCostoRecursoATipoApu } from '@/utils/tipoRecursoMapper';
 import { executeQuery, executeMutation } from '@/services/graphql-client';
-import { GET_PRECIO_RECURSO_BY_PRESUPUESTO_Y_RECURSO } from '@/graphql/queries';
+import { GET_PRECIO_RECURSO_BY_PRESUPUESTO_Y_RECURSO, GET_APU_BY_PARTIDA_QUERY } from '@/graphql/queries';
+import { GET_ESTRUCTURA_PRESUPUESTO_QUERY } from '@/graphql/queries/presupuesto.queries';
+
+const GET_PARTIDA_QUERY = `
+  query GetPartida($id_partida: String!) {
+    getPartida(id_partida: $id_partida) {
+      id_partida
+      id_partida_padre
+      id_titulo
+      nivel_partida
+      descripcion
+      unidad_medida
+      metrado
+      precio_unitario
+      parcial_partida
+    }
+  }
+`;
 import {
   ADD_RECURSO_TO_APU_MUTATION,
   UPDATE_RECURSO_IN_APU_MUTATION,
   REMOVE_RECURSO_FROM_APU_MUTATION,
   UPDATE_APU_MUTATION,
+  CREAR_PARTIDAS_SUBPARTIDAS_Y_APUS_MUTATION,
+  DELETE_APU_MUTATION,
 } from '@/graphql/mutations/apu.mutations';
+import { DELETE_PARTIDA_MUTATION } from '@/graphql/mutations/partida.mutations';
 import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 
@@ -58,6 +78,36 @@ interface RecursoAPUEditable {
   orden: number;
   enEdicion?: boolean;
   esNuevo?: boolean;
+  esSubpartida?: boolean;
+  id_partida_subpartida?: string;
+  id_partida_original?: string; // ID de la partida original que se usó para crear la subpartida
+  precio_unitario_subpartida?: number;
+  recursosSubpartida?: RecursoAPUEditable[];
+  rendimientoSubpartida?: number;
+  jornadaSubpartida?: number;
+  tiene_precio_override?: boolean;
+  precio_override?: number;
+}
+
+export interface PartidaLocal {
+  id_partida: string;
+  id_presupuesto: string;
+  id_proyecto: string;
+  id_titulo: string;
+  id_partida_padre: string | null;
+  nivel_partida: number;
+  numero_item: string;
+  descripcion: string;
+  unidad_medida: string;
+  metrado: number;
+  precio_unitario: number;
+  parcial_partida: number;
+  orden: number;
+  estado: 'Activa' | 'Inactiva';
+  recursos?: RecursoAPUEditable[];
+  rendimiento?: number;
+  jornada?: number;
+  id_partida_original?: string; // ID de la partida original usada para crear la subpartida
 }
 
 interface DetallePartidaPanelProps {
@@ -69,6 +119,13 @@ interface DetallePartidaPanelProps {
   onAgregarSubPartida?: () => void;
   onGuardarCambios?: () => void;
   modo?: 'edicion' | 'lectura' | 'meta' | 'licitacion' | 'contractual';
+  onEditarSubPartida?: (idPartidaSubpartida: string, recursos: RecursoAPUEditable[], idPartidaOriginal?: string, rendimiento?: number, jornada?: number, descripcion?: string) => void;
+  onActualizarSubPartida?: (idSubPartida: string, subPartida: PartidaLocal) => void;
+  subpartidasPendientes?: PartidaLocal[];
+  onLimpiarSubpartidasPendientes?: () => void;
+  subPartidaParaActualizar?: PartidaLocal | null;
+  onLimpiarSubPartidaParaActualizar?: () => void;
+  onEliminarSubPartida?: (idPartidaSubpartida: string) => void;
 }
 
 export default function DetallePartidaPanel({
@@ -80,6 +137,13 @@ export default function DetallePartidaPanel({
   onAgregarSubPartida,
   onGuardarCambios,
   modo = 'edicion',
+  onEditarSubPartida,
+  onActualizarSubPartida,
+  subpartidasPendientes,
+  onLimpiarSubpartidasPendientes,
+  subPartidaParaActualizar,
+  onLimpiarSubPartidaParaActualizar,
+  onEliminarSubPartida,
 }: DetallePartidaPanelProps) {
   // Convertir modos especiales a 'lectura' si no son 'edicion'
   const modoReal = modo === 'edicion' ? 'edicion' : 'lectura';
@@ -124,30 +188,141 @@ export default function DetallePartidaPanel({
       setJornada(nuevaJornada);
       setRendimientoInput(String(nuevoRendimiento));
       setJornadaInput(String(nuevaJornada));
-      const recursosEditable: RecursoAPUEditable[] = apuData.recursos.map((r, index) => ({
-        id_recurso_apu: r.id_recurso_apu,
-        recurso_id: r.recurso_id,
-        codigo_recurso: r.codigo_recurso,
-        descripcion: r.descripcion,
-        tipo_recurso: r.tipo_recurso,
-        unidad_medida: r.unidad_medida,
-        id_precio_recurso: r.id_precio_recurso,
-        precio: r.precio || 0,
-        cuadrilla: r.cuadrilla,
-        cantidad: r.cantidad,
-        desperdicio_porcentaje: r.desperdicio_porcentaje || 0,
-        parcial: r.parcial,
-        orden: r.orden,
-        esNuevo: false,
-      }));
-      setRecursosEditables(recursosEditable);
-      // Guardar valores originales
-      setValoresOriginales({
-        rendimiento: nuevoRendimiento,
-        jornada: nuevaJornada,
-        recursos: JSON.parse(JSON.stringify(recursosEditable))
-      });
-      setHasChanges(false);
+      // Cargar recursos con subpartidas
+      const cargarRecursosConSubpartidas = async () => {
+        const recursosEditablePromises = apuData.recursos.map(async (r: any, index) => {
+          // Detectar si es subpartida - verificar que id_partida_subpartida existe y no es vacío o null
+          // También verificar que no tenga recurso_id (las subpartidas no tienen recurso_id)
+          // O que tenga precio_unitario_subpartida (indicador adicional de subpartida)
+          const tieneIdSubpartida = !!(r.id_partida_subpartida && typeof r.id_partida_subpartida === 'string' && r.id_partida_subpartida.trim() !== '');
+          const noTieneRecursoId = !r.recurso_id || r.recurso_id.trim() === '';
+          const tienePrecioUnitarioSubpartida = r.precio_unitario_subpartida !== undefined && r.precio_unitario_subpartida !== null;
+
+          const esSubpartida = tieneIdSubpartida || (noTieneRecursoId && tienePrecioUnitarioSubpartida);
+
+          // Para subpartidas, usar precio_unitario_subpartida como precio
+          const precioFinal = esSubpartida && r.precio_unitario_subpartida !== undefined 
+            ? r.precio_unitario_subpartida 
+            : (r.precio || 0);
+
+          const recursoBase: RecursoAPUEditable = {
+            id_recurso_apu: r.id_recurso_apu,
+            recurso_id: r.recurso_id || '',
+            codigo_recurso: r.codigo_recurso || '',
+            descripcion: r.descripcion,
+            tipo_recurso: r.tipo_recurso,
+            unidad_medida: r.unidad_medida,
+            id_precio_recurso: r.id_precio_recurso,
+            precio: precioFinal,
+            cuadrilla: r.cuadrilla,
+            cantidad: r.cantidad,
+            desperdicio_porcentaje: r.desperdicio_porcentaje || 0,
+            parcial: 0, // Se calculará después con calcularParcial
+            orden: r.orden,
+            enEdicion: false,
+            esNuevo: false,
+            esSubpartida: esSubpartida,
+            id_partida_subpartida: r.id_partida_subpartida || undefined,
+            precio_unitario_subpartida: r.precio_unitario_subpartida,
+            recursosSubpartida: [],
+            rendimientoSubpartida: undefined,
+            jornadaSubpartida: undefined,
+            tiene_precio_override: r.tiene_precio_override || false,
+            precio_override: r.precio_override,
+          };
+          
+
+          // Calcular parcial después de crear el objeto completo
+          recursoBase.parcial = calcularParcial(recursoBase);
+
+          // Si es subpartida, cargar su APU para obtener recursos, rendimiento y jornada
+          if (esSubpartida && r.id_partida_subpartida) {
+            try {
+              const subpartidaApuResponse = await executeQuery<{ getApuByPartida: any }>(
+                GET_APU_BY_PARTIDA_QUERY,
+                { id_partida: r.id_partida_subpartida }
+              );
+
+              if (subpartidaApuResponse?.getApuByPartida) {
+                const subpartidaApu = subpartidaApuResponse.getApuByPartida;
+
+                // Convertir recursos del APU de la subpartida a RecursoAPUEditable
+                const recursosSubpartida: RecursoAPUEditable[] = (subpartidaApu.recursos || []).map((sr: any) => {
+                  const recursoSub: RecursoAPUEditable = {
+                    id_recurso_apu: sr.id_recurso_apu,
+                    recurso_id: sr.recurso_id || '',
+                    codigo_recurso: sr.codigo_recurso || '',
+                    descripcion: sr.descripcion,
+                    tipo_recurso: sr.tipo_recurso,
+                    unidad_medida: sr.unidad_medida,
+                    id_precio_recurso: sr.id_precio_recurso,
+                    precio: sr.precio || 0,
+                    cuadrilla: sr.cuadrilla,
+                    cantidad: sr.cantidad,
+                    desperdicio_porcentaje: sr.desperdicio_porcentaje || 0,
+                    parcial: 0, // Se calculará después
+                    orden: sr.orden,
+                    enEdicion: false,
+                    esNuevo: false,
+                    esSubpartida: false,
+                    tiene_precio_override: sr.tiene_precio_override || false,
+                    precio_override: sr.precio_override,
+                  };
+
+                  // Calcular parcial después de crear el objeto completo
+                  recursoSub.parcial = calcularParcial(recursoSub);
+                  return recursoSub;
+                });
+
+                recursoBase.recursosSubpartida = recursosSubpartida;
+                recursoBase.rendimientoSubpartida = subpartidaApu.rendimiento || 1.0;
+                recursoBase.jornadaSubpartida = subpartidaApu.jornada || 8;
+
+                // Obtener la partida subpartida para obtener su id_partida_padre (que es el id_partida_original)
+                try {
+                  const partidaSubpartidaResponse = await executeQuery<{ getPartida: any }>(
+                    GET_PARTIDA_QUERY,
+                    { id_partida: r.id_partida_subpartida }
+                  );
+
+                  if (partidaSubpartidaResponse?.getPartida) {
+                    const partidaSubpartida = partidaSubpartidaResponse.getPartida;
+                    // El id_partida_original es el id_partida_padre de la partida subpartida
+                    recursoBase.id_partida_original = partidaSubpartida.id_partida_padre || id_partida || undefined;
+                    // Usar la descripción de la partida subpartida (que es la descripción editada guardada)
+                    if (partidaSubpartida.descripcion) {
+                      recursoBase.descripcion = partidaSubpartida.descripcion;
+                    }
+                  } else {
+                    // Si no se encuentra, usar el id_partida actual como referencia
+                    recursoBase.id_partida_original = id_partida || undefined;
+                  }
+                } catch (error) {
+                  // Si hay error, usar el id_partida actual como referencia
+                  recursoBase.id_partida_original = id_partida || undefined;
+                }
+              }
+            } catch (error) {
+              // Error silencioso al cargar APU de subpartida
+            }
+          }
+
+          return recursoBase;
+        });
+
+        const recursosEditable = await Promise.all(recursosEditablePromises);
+        setRecursosEditables(recursosEditable);
+
+        // Guardar valores originales
+        setValoresOriginales({
+          rendimiento: nuevoRendimiento,
+          jornada: nuevaJornada,
+          recursos: JSON.parse(JSON.stringify(recursosEditable))
+        });
+        setHasChanges(false);
+      };
+
+      cargarRecursosConSubpartidas();
     } else if (id_partida && !isLoadingApu) {
       setRecursosEditables([]);
       setRendimiento(1.0);
@@ -175,6 +350,35 @@ export default function DetallePartidaPanel({
       setHasPartidaChanges(false);
     }
   }, [partida]);
+
+  // Inicializar precios en el contexto después del render (evitar error de React)
+  useEffect(() => {
+    if (recursosEditables.length === 0) return;
+
+    // Inicializar precios de recursos normales
+    recursosEditables.forEach(r => {
+      // Excluir recursos con precio calculado (%MO)
+      const esEquipoConPorcentajeMo = r.tipo_recurso === 'EQUIPO' && (r.unidad_medida === '%mo' || r.unidad_medida?.toLowerCase() === '%mo');
+      if (r.recurso_id && r.precio !== undefined && r.precio !== null && !esEquipoConPorcentajeMo) {
+        // TODO: Aquí debería inicializar precio en el contexto si existe
+        // precioSync.actualizarPrecio(r.recurso_id, r.precio, 'DetallePartidaPanel-carga');
+      }
+    });
+
+    // También inicializar precios de recursos dentro de subpartidas
+    recursosEditables.forEach(r => {
+      if (r.recursosSubpartida) {
+        r.recursosSubpartida.forEach(sr => {
+          // Excluir recursos con precio calculado (%MO)
+          const esEquipoConPorcentajeMoSub = sr.tipo_recurso === 'EQUIPO' && (sr.unidad_medida === '%mo' || sr.unidad_medida?.toLowerCase() === '%mo');
+          if (sr.recurso_id && sr.precio !== undefined && sr.precio !== null && !esEquipoConPorcentajeMoSub) {
+            // TODO: Aquí debería inicializar precio en el contexto si existe
+            // precioSync.actualizarPrecio(sr.recurso_id, sr.precio, 'DetallePartidaPanel-carga-subpartida');
+          }
+        });
+      }
+    });
+  }, [recursosEditables]);
 
   // Función helper para truncar a 4 decimales (para cuadrilla y cantidad)
   const truncateToFour = (num: number): number => {
@@ -223,51 +427,56 @@ export default function DetallePartidaPanel({
   }, [recursosEditables, rendimiento, jornada]);
 
   const calcularParcial = (recurso: RecursoAPUEditable): number => {
+    // Si es una subpartida, el parcial es cantidad × precio_unitario_subpartida
+    if (recurso.esSubpartida && recurso.precio_unitario_subpartida !== undefined) {
+      return roundToTwo(recurso.cantidad * recurso.precio_unitario_subpartida);
+    }
+
     const { tipo_recurso, cantidad, precio, cuadrilla, desperdicio_porcentaje, unidad_medida } = recurso;
-    
+
     switch (tipo_recurso) {
       case 'MATERIAL':
         const cantidadConDesperdicio = cantidad * (1 + (desperdicio_porcentaje || 0) / 100);
         return roundToTwo(cantidadConDesperdicio * precio);
-      
+
       case 'MANO_OBRA': {
         // Fórmula correcta para MANO DE OBRA:
         // Parcial_MO = (1 / Rendimiento) × Jornada × Cuadrilla × Precio_Hora
         // O también: Parcial_MO = Cantidad × Precio_Hora (donde Cantidad = (Jornada × Cuadrilla) / Rendimiento)
         if (!rendimiento || rendimiento <= 0) return 0;
         if (!jornada || jornada <= 0) return 0;
-        
+
         const cuadrillaValue = cuadrilla || 1;
         // Parcial_MO = (1 / Rendimiento) × Jornada × Cuadrilla × Precio_Hora
         return roundToTwo((1 / rendimiento) * jornada * cuadrillaValue * precio);
       }
-      
+
       case 'EQUIPO':
         // Si la unidad es "%mo", calcular basándose en la sumatoria de HH de MO con unidad "hh"
         if (unidad_medida === '%mo' || unidad_medida?.toLowerCase() === '%mo') {
           // Sumar todos los parciales de MO con unidad "hh"
           const sumaHHManoObra = calcularSumaParcialesManoObra();
-          
+
           // Aplicar el porcentaje: sumaHH * (cantidad / 100)
           return roundToTwo(sumaHHManoObra * (cantidad / 100));
         }
-        
+
         // Si la unidad es "hm" (horas hombre), usar cálculo con cuadrilla (similar a MANO_OBRA)
         if (unidad_medida === 'hm' || unidad_medida?.toLowerCase() === 'hm') {
           if (!rendimiento || rendimiento <= 0) return 0;
           if (!jornada || jornada <= 0) return 0;
-          
+
           const cuadrillaValue = cuadrilla || 1;
           // Parcial = (1 / Rendimiento) × Jornada × Cuadrilla × Precio_Hora
           return roundToTwo((1 / rendimiento) * jornada * cuadrillaValue * precio);
         }
-        
+
         // Para otras unidades: cálculo simple cantidad × precio
         return roundToTwo(cantidad * precio);
-      
+
       case 'SUBCONTRATO':
         return roundToTwo(cantidad * precio);
-      
+
       default:
         return roundToTwo(cantidad * precio);
     }
@@ -290,9 +499,11 @@ export default function DetallePartidaPanel({
       cantidad: 0,
       parcial: 0,
       orden: recursosEditables.length,
-      enEdicion: true,
-      esNuevo: true,
-    };
+        enEdicion: true,
+        esNuevo: true,
+        tiene_precio_override: false,
+        precio_override: undefined,
+      };
     setRecursosEditables([...recursosEditables, nuevaFila]);
     setHasChanges(true);
   };
@@ -374,7 +585,7 @@ export default function DetallePartidaPanel({
     setHasChanges(true);
   };
 
-  const handleUpdateRecurso = (recursoId: string, campo: keyof RecursoAPUEditable, valor: string | number | null) => {
+  const handleUpdateRecurso = (recursoId: string, campo: keyof RecursoAPUEditable, valor: string | number | boolean | null | undefined) => {
     setRecursosEditables(prev => {
       // Calcular suma de parciales de MANO_OBRA para actualizar precio de equipos con unidad "%mo"
       const sumaHHManoObra = prev
@@ -389,8 +600,25 @@ export default function DetallePartidaPanel({
       
       return prev.map(r => {
         if (r.id_recurso_apu === recursoId) {
-          const numValor = typeof valor === 'string' ? parseFloat(valor) || 0 : (valor || 0);
+          const numValor = typeof valor === 'string' ? parseFloat(valor) || 0 : (typeof valor === 'number' ? valor : 0);
           const nuevoRecurso = { ...r };
+          
+          // Manejar campos especiales primero
+          if (campo === 'tiene_precio_override' || campo === 'precio_override') {
+            if (campo === 'tiene_precio_override') {
+              nuevoRecurso.tiene_precio_override = valor === true;
+              // Si se activa, copiar el precio actual a precio_override
+              if (valor === true) {
+                nuevoRecurso.precio_override = nuevoRecurso.precio || 0;
+              } else {
+                // Si se desactiva, limpiar precio_override
+                nuevoRecurso.precio_override = undefined;
+              }
+            } else if (campo === 'precio_override') {
+              nuevoRecurso.precio_override = typeof valor === 'number' ? roundToTwo(valor) : undefined;
+            }
+            return nuevoRecurso;
+          }
           
         // Sincronización de campos según el tipo de recurso
         const unidadMedidaLower = r.unidad_medida?.toLowerCase() || '';
@@ -438,6 +666,10 @@ export default function DetallePartidaPanel({
               nuevoRecurso.cantidad = truncateToFour(numValor);
             } else if (campo === 'precio') {
               nuevoRecurso.precio = roundToTwo(numValor);
+              // Si tiene override activado, actualizar también precio_override
+              if (nuevoRecurso.tiene_precio_override) {
+                nuevoRecurso.precio_override = roundToTwo(numValor);
+              }
             } else if (campo === 'desperdicio_porcentaje') {
               nuevoRecurso.desperdicio_porcentaje = truncateToFour(numValor);
             } else {
@@ -447,8 +679,20 @@ export default function DetallePartidaPanel({
             // Para MATERIAL y SUBCONTRATO: lógica normal (sin sincronización cantidad-cuadrilla)
             if (campo === 'cantidad') {
               nuevoRecurso.cantidad = truncateToFour(numValor);
+              // Para subpartidas, recalcular precio cuando cambia la cantidad
+              if (r.esSubpartida && r.precio_unitario_subpartida) {
+                nuevoRecurso.precio = roundToTwo(nuevoRecurso.cantidad * r.precio_unitario_subpartida);
+              }
             } else if (campo === 'precio') {
+              // Para subpartidas, no permitir editar precio manualmente
+              if (r.esSubpartida) {
+                return r; // No hacer cambios
+              }
               nuevoRecurso.precio = roundToTwo(numValor);
+              // Si tiene override activado, actualizar también precio_override
+              if (nuevoRecurso.tiene_precio_override) {
+                nuevoRecurso.precio_override = roundToTwo(numValor);
+              }
             } else if (campo === 'cuadrilla') {
               nuevoRecurso.cuadrilla = truncateToFour(numValor);
             } else if (campo === 'desperdicio_porcentaje') {
@@ -523,63 +767,25 @@ export default function DetallePartidaPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rendimiento, jornada]);
   
-  const handleEliminarRecurso = async (recursoId: string) => {
-    try {
-      // Filtrar el recurso localmente primero
-      setRecursosEditables(prev => prev.filter(r => r.id_recurso_apu !== recursoId));
+  const handleEliminarRecurso = (recursoId: string) => {
+    // Verificar si el recurso que se va a eliminar es una subpartida
+    const recursoAEliminar = recursosEditables.find(r => r.id_recurso_apu === recursoId);
 
-      // Si no hay APU aún, solo marcar cambios
-      const { data: apuDataActualizado } = await refetchApu();
-      const apuExiste = apuDataActualizado || apuData;
+    // Solo quitar el recurso localmente, no eliminar del backend
+    // Se eliminará realmente cuando se pulse "Guardar Cambios"
+    setRecursosEditables(prev => prev.filter(r => r.id_recurso_apu !== recursoId));
 
-      if (!apuExiste) {
-        setHasChanges(true);
-        return;
-      }
-
-      // Eliminar el recurso del backend
-      await executeMutation<{ removeRecursoFromApu: any }>(
-        REMOVE_RECURSO_FROM_APU_MUTATION,
-        {
-          id_apu: apuExiste.id_apu,
-          id_recurso_apu: recursoId,
-        }
-      );
-
-      // Invalidar queries y refetch para actualizar la UI
-      queryClient.invalidateQueries({ queryKey: ['apu'] });
-      await refetchApu();
-
-      // Marcar que se guardaron cambios
-      setHasChanges(false);
-
-      // Notificar al componente padre que se guardaron cambios
-      if (onGuardarCambios) {
-        onGuardarCambios();
-      }
-
-      toast.success('Recurso eliminado correctamente');
-    } catch (error) {
-      console.error('Error al eliminar recurso:', error);
-      toast.error('Error al eliminar el recurso');
-
-      // Revertir el cambio local en caso de error
-      const { data: apuDataActualizado } = await refetchApu();
-      if (apuDataActualizado) {
-        setRecursosEditables(apuDataActualizado.recursos.map(r => ({
-          ...r,
-          parcial: calcularParcial({
-            ...r,
-            tipo_recurso: r.tipo_recurso as TipoRecursoApu,
-          }),
-        })));
-      }
+    // Si es una subpartida, también eliminarla del estado del padre
+    if (recursoAEliminar?.esSubpartida && recursoAEliminar.id_partida_subpartida && onEliminarSubPartida) {
+      onEliminarSubPartida(recursoAEliminar.id_partida_subpartida);
     }
+
+    setHasChanges(true);
   };
 
   const handleCancelarCambios = () => {
     if (!valoresOriginales) return;
-    
+
     // Restaurar valores originales
     setRendimiento(valoresOriginales.rendimiento);
     setJornada(valoresOriginales.jornada);
@@ -589,6 +795,228 @@ export default function DetallePartidaPanel({
     setHasChanges(false);
     toast.success('Cambios cancelados');
   };
+
+  // Función para agregar subpartida como recurso
+  const handleAgregarSubPartidaComoRecurso = useCallback((subPartida: PartidaLocal) => {
+    const nuevoId = `subpartida-${Date.now()}`;
+    const nuevaFila: RecursoAPUEditable = {
+      id_recurso_apu: nuevoId,
+      recurso_id: '',
+      codigo_recurso: '',
+      descripcion: subPartida.descripcion,
+      tipo_recurso: 'MATERIAL', // Tipo por defecto, no se usa para subpartidas
+      unidad_medida: subPartida.unidad_medida,
+      id_precio_recurso: null,
+      precio: subPartida.metrado * subPartida.precio_unitario, // cantidad × PU
+      cuadrilla: undefined, // No se usa para subpartidas
+      cantidad: subPartida.metrado, // Usar el metrado como cantidad inicial
+      desperdicio_porcentaje: undefined,
+      parcial: roundToTwo(subPartida.metrado * subPartida.precio_unitario), // Parcial = cantidad × precio_unitario_subpartida
+      orden: recursosEditables.length,
+      enEdicion: false,
+      esNuevo: true,
+      esSubpartida: true,
+      id_partida_subpartida: subPartida.id_partida,
+      // Usar id_partida_original directamente de la subpartida, o extraerlo de los recursos como fallback
+      id_partida_original: subPartida.id_partida_original ||
+        (subPartida.recursos && subPartida.recursos.length > 0
+          ? (subPartida.recursos[0] as any).id_partida_original || null
+          : null), // ID de la partida original usada para crear la subpartida
+      precio_unitario_subpartida: subPartida.precio_unitario,
+      // Guardar TODOS los datos de la subpartida para poder editarlos después
+      recursosSubpartida: subPartida.recursos || [],
+      // Guardar rendimiento y jornada si existen
+      rendimientoSubpartida: subPartida.rendimiento,
+      jornadaSubpartida: subPartida.jornada,
+      tiene_precio_override: false, // Las subpartidas no usan override
+      precio_override: undefined,
+    };
+    setRecursosEditables([...recursosEditables, nuevaFila]);
+    setHasChanges(true);
+  }, [recursosEditables]);
+
+  // Efecto para agregar subpartidas pendientes
+  useEffect(() => {
+    if (subpartidasPendientes && subpartidasPendientes.length > 0) {
+      // Procesar cada subpartida pendiente
+      subpartidasPendientes.forEach(subPartida => {
+        // Verificar si ya existe una subpartida con el mismo ID
+        const subpartidaExistente = recursosEditables.find(
+          r => r.esSubpartida && r.id_partida_subpartida === subPartida.id_partida
+        );
+
+        if (!subpartidaExistente) {
+          // Agregar nueva subpartida
+          handleAgregarSubPartidaComoRecurso(subPartida);
+        }
+      });
+
+      // Limpiar las subpartidas pendientes después de procesarlas
+      if (onLimpiarSubpartidasPendientes) {
+        setTimeout(() => onLimpiarSubpartidasPendientes(), 0);
+      }
+    }
+  }, [subpartidasPendientes, handleAgregarSubPartidaComoRecurso, recursosEditables, onLimpiarSubpartidasPendientes]);
+
+  // Efecto para actualizar subpartida existente
+  useEffect(() => {
+    if (subPartidaParaActualizar) {
+      // Verificar si ya existe una subpartida con el mismo ID (actualización)
+      const subpartidaExistente = recursosEditables.find(
+        r => r.esSubpartida && r.id_partida_subpartida === subPartidaParaActualizar.id_partida
+      );
+
+      if (subpartidaExistente) {
+        // Actualizar la subpartida existente con TODOS los datos
+        setRecursosEditables(prev => {
+          const nuevosRecursos = prev.map(r => {
+          if (r.esSubpartida && r.id_partida_subpartida === subPartidaParaActualizar.id_partida) {
+            // Recalcular parciales de los recursos dentro de la subpartida
+            // Usar un Map para preservar id_recurso_apu existentes de manera más eficiente
+            const recursosExistentesMap = new Map<string, RecursoAPUEditable>();
+            (r.recursosSubpartida || []).forEach(re => {
+              // Usar una clave única basada en recurso_id y codigo_recurso, o id_recurso_apu si existe
+              const clave = re.id_recurso_apu || 
+                (re.recurso_id && re.codigo_recurso 
+                  ? `${re.recurso_id}-${re.codigo_recurso}` 
+                  : `temp-${re.orden || Date.now()}`);
+              recursosExistentesMap.set(clave, re);
+            });
+
+            const recursosSubpartidaActualizados = (subPartidaParaActualizar.recursos || []).map((sr: RecursoAPUEditable, index: number) => {
+              // Intentar encontrar el recurso existente por id_recurso_apu primero
+              let recursoExistente: RecursoAPUEditable | undefined = undefined;
+              let idRecursoApuPreservado: string | undefined = undefined;
+
+              if (sr.id_recurso_apu) {
+                // Si tiene id_recurso_apu, buscar por ese
+                recursoExistente = Array.from(recursosExistentesMap.values()).find(
+                  re => re.id_recurso_apu === sr.id_recurso_apu
+                );
+                if (recursoExistente) {
+                  idRecursoApuPreservado = recursoExistente.id_recurso_apu;
+                }
+              }
+
+              // Si no se encontró por id_recurso_apu, buscar por recurso_id y codigo_recurso
+              if (!recursoExistente && sr.recurso_id && sr.codigo_recurso) {
+                recursoExistente = Array.from(recursosExistentesMap.values()).find(
+                  re => re.recurso_id === sr.recurso_id && re.codigo_recurso === sr.codigo_recurso
+                );
+                if (recursoExistente) {
+                  idRecursoApuPreservado = recursoExistente.id_recurso_apu;
+                }
+              }
+
+              // Si es un recurso nuevo (sin id_recurso_apu), generar uno estable
+              const idRecursoApuFinal = idRecursoApuPreservado || sr.id_recurso_apu || 
+                (sr.recurso_id && sr.codigo_recurso
+                  ? `temp-${sr.recurso_id}-${sr.codigo_recurso}`
+                  : `temp-${subPartidaParaActualizar.id_partida}-${index}-${sr.orden || index}`);
+
+              // Calcular parcial usando el rendimiento y jornada de la subpartida
+              const rendimientoSubpartida = subPartidaParaActualizar.rendimiento || 1.0;
+              const jornadaSubpartida = subPartidaParaActualizar.jornada || 8;
+              
+              let parcialCalculado = 0;
+              const { tipo_recurso, cantidad, precio, cuadrilla, desperdicio_porcentaje, unidad_medida } = sr;
+              
+              switch (tipo_recurso) {
+                case 'MATERIAL':
+                  const cantidadConDesperdicio = cantidad * (1 + (desperdicio_porcentaje || 0) / 100);
+                  parcialCalculado = roundToTwo(cantidadConDesperdicio * precio);
+                  break;
+                  
+                case 'MANO_OBRA': {
+                  if (rendimientoSubpartida > 0 && jornadaSubpartida > 0) {
+                    const cuadrillaValue = cuadrilla || 1;
+                    parcialCalculado = roundToTwo((1 / rendimientoSubpartida) * jornadaSubpartida * cuadrillaValue * precio);
+                  }
+                  break;
+                }
+                
+                case 'EQUIPO': {
+                  if (unidad_medida === '%mo' || unidad_medida?.toLowerCase() === '%mo') {
+                    // Para %mo, necesitamos calcular la suma de parciales de MO de la subpartida
+                    const sumaHHManoObra = (subPartidaParaActualizar.recursos || [])
+                      .filter(r => r.tipo_recurso === 'MANO_OBRA')
+                      .reduce((suma, r) => {
+                        if (rendimientoSubpartida > 0 && jornadaSubpartida > 0) {
+                          const cuadrillaValue = r.cuadrilla || 1;
+                          const parcialMO = (1 / rendimientoSubpartida) * jornadaSubpartida * cuadrillaValue * (r.precio || 0);
+                          return suma + parcialMO;
+                        }
+                        return suma;
+                      }, 0);
+                    parcialCalculado = roundToTwo(sumaHHManoObra * (cantidad / 100));
+                  } else if (unidad_medida === 'hm' || unidad_medida?.toLowerCase() === 'hm') {
+                    if (rendimientoSubpartida > 0 && jornadaSubpartida > 0) {
+                      const cuadrillaValue = cuadrilla || 1;
+                      parcialCalculado = roundToTwo((1 / rendimientoSubpartida) * jornadaSubpartida * cuadrillaValue * precio);
+                    }
+                  } else {
+                    parcialCalculado = roundToTwo(cantidad * precio);
+                  }
+                  break;
+                }
+                
+                case 'SUBCONTRATO':
+                  parcialCalculado = roundToTwo(cantidad * precio);
+                  break;
+                  
+                default:
+                  parcialCalculado = roundToTwo(cantidad * precio);
+              }
+
+              return {
+                ...sr,
+                id_recurso_apu: idRecursoApuFinal,
+                parcial: parcialCalculado,
+                // Asegurar que todos los campos necesarios estén presentes
+                enEdicion: false,
+                esNuevo: !idRecursoApuPreservado, // Marcar como nuevo si no tenía id_recurso_apu
+                esSubpartida: false, // Los recursos dentro de la subpartida no son subpartidas
+              };
+            });
+
+            // Recalcular precio_unitario_subpartida sumando los parciales actualizados
+            const costoDirectoSubpartida = recursosSubpartidaActualizados.reduce((suma, subr) => suma + (subr.parcial || 0), 0);
+            const nuevoPrecioUnitario = Math.round(costoDirectoSubpartida * 100) / 100; // roundToTwo equivalente
+
+            return {
+              ...r,
+              descripcion: subPartidaParaActualizar.descripcion,
+              unidad_medida: subPartidaParaActualizar.unidad_medida,
+              precio_unitario_subpartida: nuevoPrecioUnitario, // Usar el recalculado, no el que viene del modal
+              precio: Math.round(r.cantidad * nuevoPrecioUnitario * 100) / 100, // El precio calculado va aquí
+              parcial: roundToTwo(r.cantidad * nuevoPrecioUnitario), // Parcial = cantidad × precio_unitario_subpartida
+              recursosSubpartida: recursosSubpartidaActualizados,
+              // Actualizar también el id_partida_original
+              id_partida_original: subPartidaParaActualizar.id_partida_original ||
+                (subPartidaParaActualizar.recursos && subPartidaParaActualizar.recursos.length > 0
+                  ? (subPartidaParaActualizar.recursos[0] as any).id_partida_original || r.id_partida_original
+                  : r.id_partida_original),
+              // Actualizar rendimiento y jornada guardados
+              rendimientoSubpartida: subPartidaParaActualizar.rendimiento,
+              jornadaSubpartida: subPartidaParaActualizar.jornada,
+            };
+          }
+          return r;
+          });
+
+          return nuevosRecursos;
+        });
+
+        setHasChanges(true);
+
+        // Limpiar el estado después de procesar
+        if (onLimpiarSubPartidaParaActualizar) {
+          setTimeout(() => onLimpiarSubPartidaParaActualizar(), 0);
+        }
+      } else {
+      }
+    }
+  }, [subPartidaParaActualizar, recursosEditables, onLimpiarSubPartidaParaActualizar]);
 
   // Handler para actualizar metrado de la partida
   const handleActualizarMetrado = async (nuevoMetrado: number) => {
@@ -659,6 +1087,15 @@ export default function DetallePartidaPanel({
     };
 
     recursosEditables.forEach((r, index) => {
+      // Si es subpartida, validar solo cantidad
+      if (r.esSubpartida) {
+        if (r.cantidad === undefined || r.cantidad === null || r.cantidad <= 0) {
+          errores.sinCantidad.push(r.descripcion.trim());
+        }
+        return; // No validar precio ni cuadrilla para subpartidas
+      }
+      
+      // Validaciones para recursos normales
       if (!r.recurso_id || !r.descripcion) {
         errores.sinSeleccionar.push(`Fila ${index + 1}`);
       } else {
@@ -716,15 +1153,14 @@ export default function DetallePartidaPanel({
 
     try {
       const recursosInput: RecursoApuInput[] = recursosEditables
-        .filter(r => r.recurso_id && r.descripcion)
-        .map((r, index) => ({
-            recurso_id: r.recurso_id,
-            codigo_recurso: r.codigo_recurso,
+        .filter(r => (r.recurso_id && r.descripcion) || r.esSubpartida)
+        .map((r, index) => {
+          const baseInput = {
+            codigo_recurso: r.esSubpartida ? (r.codigo_recurso || '') : r.codigo_recurso,
             descripcion: r.descripcion,
             unidad_medida: r.unidad_medida,
             tipo_recurso: r.tipo_recurso,
             tipo_recurso_codigo: r.tipo_recurso,
-            id_precio_recurso: r.id_precio_recurso,
             precio_usuario: roundToTwo(r.precio), // Asegurar que se guarde con 2 decimales
             cuadrilla: r.cuadrilla ? truncateToFour(r.cuadrilla) : undefined, // Cuadrilla con 4 decimales
             cantidad: truncateToFour(r.cantidad), // Cantidad con 4 decimales
@@ -732,12 +1168,325 @@ export default function DetallePartidaPanel({
             cantidad_con_desperdicio: truncateToFour(r.cantidad * (1 + (r.desperdicio_porcentaje || 0) / 100)),
             parcial: roundToTwo(r.parcial), // Parcial con 2 decimales
             orden: index,
-          }));
+            tiene_precio_override: r.tiene_precio_override || false,
+            precio_override: r.tiene_precio_override ? r.precio_override : undefined,
+          };
+          
+
+          // Si es subpartida, agregar campos específicos
+          if (r.esSubpartida) {
+            return {
+              ...baseInput,
+              id_partida_subpartida: r.id_partida_subpartida,
+              precio_unitario_subpartida: roundToTwo(r.precio_unitario_subpartida || 0),
+              // recurso_id es opcional para subpartidas
+              recurso_id: r.recurso_id || undefined,
+            };
+          } else {
+            // Para recursos normales
+            return {
+              ...baseInput,
+              recurso_id: r.recurso_id,
+              id_precio_recurso: r.id_precio_recurso,
+            };
+          }
+        });
 
       // Variables para tracking de cambios
       let recursosAEliminar: any[] = [];
       let recursosNuevos: RecursoApuInput[] = [];
       let recursosActualizados: Array<{ id_recurso_apu: string; recurso: RecursoApuInput }> = [];
+
+      // Detectar subpartidas nuevas (con temp_id) y crearlas ANTES de guardar cambios
+      const subpartidasNuevas = recursosEditables.filter(
+        r => r.esSubpartida && r.id_partida_subpartida?.startsWith('temp_')
+      );
+
+      const mapeoTempIdARealId = new Map<string, string>();
+
+      if (subpartidasNuevas.length > 0 && id_partida && id_presupuesto && id_proyecto) {
+        // Obtener partida completa para obtener id_titulo y nivel_partida
+        let partidaCompleta: any = null;
+        try {
+          const partidaResponse = await executeQuery<{ getPartida: any }>(
+            GET_PARTIDA_QUERY,
+            { id_partida }
+          );
+          partidaCompleta = partidaResponse?.getPartida;
+        } catch (error) {
+          console.error('Error obteniendo partida completa:', error);
+        }
+
+        // Si no se obtuvo de la query, buscar en la estructura del presupuesto
+        if (!partidaCompleta?.id_titulo) {
+          // Obtener estructura completa del presupuesto para buscar la partida
+          try {
+            const estructuraResponse = await executeQuery<{ getEstructuraPresupuesto: any }>(
+              GET_ESTRUCTURA_PRESUPUESTO_QUERY,
+              { id_presupuesto }
+            );
+            if (estructuraResponse?.getEstructuraPresupuesto?.partidas) {
+              partidaCompleta = estructuraResponse.getEstructuraPresupuesto.partidas.find(
+                (p: any) => p.id_partida === id_partida
+              );
+            }
+          } catch (error) {
+            console.error('Error obteniendo estructura del presupuesto:', error);
+          }
+        }
+
+        // Preparar subpartidas para crear
+        const subpartidasParaCrear = subpartidasNuevas.map(subpartida => ({
+          temp_id: subpartida.id_partida_subpartida!,
+          id_partida_padre: id_partida,
+          id_presupuesto: id_presupuesto,
+          id_proyecto: id_proyecto,
+          id_titulo: partidaCompleta?.id_titulo || '',
+          nivel_partida: partidaCompleta?.nivel_partida ? partidaCompleta.nivel_partida + 1 : 1,
+          descripcion: subpartida.descripcion,
+          unidad_medida: subpartida.unidad_medida,
+          precio_unitario: subpartida.precio_unitario_subpartida || 0,
+          metrado: subpartida.cantidad,
+          rendimiento: subpartida.rendimientoSubpartida || 1.0,
+          jornada: subpartida.jornadaSubpartida || 8,
+          recursos: (subpartida.recursosSubpartida || []).map((r: RecursoAPUEditable) => ({
+            recurso_id: r.recurso_id || undefined,
+            codigo_recurso: r.codigo_recurso || '',
+            descripcion: r.descripcion,
+            unidad_medida: r.unidad_medida,
+            tipo_recurso: r.tipo_recurso || 'MATERIAL',
+            id_precio_recurso: r.id_precio_recurso || undefined,
+            precio_usuario: roundToTwo(r.precio || 0),
+            cuadrilla: r.cuadrilla ? truncateToFour(r.cuadrilla) : undefined,
+            cantidad: truncateToFour(r.cantidad),
+            desperdicio_porcentaje: r.desperdicio_porcentaje || 0,
+            cantidad_con_desperdicio: truncateToFour(r.cantidad * (1 + (r.desperdicio_porcentaje || 0) / 100)),
+            parcial: roundToTwo(r.parcial || 0),
+            orden: r.orden || 0,
+          })),
+        }));
+
+        // Crear partidas subpartidas y sus APUs
+        const resultado = await executeMutation<{ crearPartidasSubpartidasYAPUs: { mapeo: Array<{ temp_id: string; id_partida_real: string }> } }>(
+          CREAR_PARTIDAS_SUBPARTIDAS_Y_APUS_MUTATION,
+          { subpartidas: subpartidasParaCrear }
+        );
+
+        // Crear mapeo de temp_id -> id_partida_real
+        resultado.crearPartidasSubpartidasYAPUs.mapeo.forEach(m => {
+          mapeoTempIdARealId.set(m.temp_id, m.id_partida_real);
+        });
+
+        // Actualizar recursos editables con IDs reales
+        recursosEditables.forEach(recurso => {
+          if (recurso.esSubpartida && recurso.id_partida_subpartida && mapeoTempIdARealId.has(recurso.id_partida_subpartida)) {
+            recurso.id_partida_subpartida = mapeoTempIdARealId.get(recurso.id_partida_subpartida)!;
+          }
+        });
+
+        // Invalidar queries para refrescar datos
+        queryClient.invalidateQueries({ queryKey: ['apu'] });
+        queryClient.invalidateQueries({ queryKey: ['estructura-presupuesto'] });
+      }
+
+      // Detectar y actualizar subpartidas existentes que fueron modificadas
+      const subpartidasExistentes = recursosEditables.filter(
+        r => r.esSubpartida && r.id_partida_subpartida && !r.id_partida_subpartida.startsWith('temp_')
+      );
+
+      if (subpartidasExistentes.length > 0 && valoresOriginales) {
+        const tolerancia = 0.0001;
+        
+        for (const subpartida of subpartidasExistentes) {
+          const subpartidaOriginal = valoresOriginales.recursos.find(
+            orig => orig.id_partida_subpartida === subpartida.id_partida_subpartida
+          );
+
+          if (!subpartidaOriginal) continue;
+
+          // Verificar si hay cambios en la subpartida
+          const hayCambiosCantidad = Math.abs((subpartida.cantidad || 0) - (subpartidaOriginal.cantidad || 0)) > tolerancia;
+          const hayCambiosRendimiento = subpartida.rendimientoSubpartida !== undefined &&
+            subpartidaOriginal.rendimientoSubpartida !== undefined &&
+            Math.abs((subpartida.rendimientoSubpartida || 1.0) - (subpartidaOriginal.rendimientoSubpartida || 1.0)) > tolerancia;
+          const hayCambiosJornada = subpartida.jornadaSubpartida !== undefined &&
+            subpartidaOriginal.jornadaSubpartida !== undefined &&
+            Math.abs((subpartida.jornadaSubpartida || 8) - (subpartidaOriginal.jornadaSubpartida || 8)) > tolerancia;
+
+          // Comparar recursos de la subpartida
+          const recursosActuales = subpartida.recursosSubpartida || [];
+          const recursosOriginales = subpartidaOriginal.recursosSubpartida || [];
+
+          // Función para comparar recursos
+          const recursoCambio = (actual: RecursoAPUEditable, original: RecursoAPUEditable | undefined): boolean => {
+            if (!original) return true;
+            return (
+              Math.abs((actual.cantidad || 0) - (original.cantidad || 0)) > tolerancia ||
+              Math.abs((actual.precio || 0) - (original.precio || 0)) > tolerancia ||
+              Math.abs((actual.parcial || 0) - (original.parcial || 0)) > tolerancia ||
+              Math.abs((actual.cuadrilla || 0) - (original.cuadrilla || 0)) > tolerancia ||
+              Math.abs((actual.desperdicio_porcentaje || 0) - (original.desperdicio_porcentaje || 0)) > tolerancia ||
+              actual.id_precio_recurso !== original.id_precio_recurso ||
+              actual.orden !== original.orden ||
+              actual.tiene_precio_override !== original.tiene_precio_override ||
+              Math.abs((actual.precio_override || 0) - (original.precio_override || 0)) > tolerancia
+            );
+          };
+
+          // Crear Maps para comparación
+          const recursosActualesMap = new Map<string, RecursoAPUEditable>();
+          recursosActuales.forEach((r, index) => {
+            const clave = r.id_recurso_apu || `${r.recurso_id || ''}-${r.codigo_recurso || ''}-${r.orden !== undefined ? r.orden : index}`;
+            recursosActualesMap.set(clave, r);
+          });
+
+          const recursosOriginalesMap = new Map<string, RecursoAPUEditable>();
+          recursosOriginales.forEach((r, index) => {
+            const clave = r.id_recurso_apu || `${r.recurso_id || ''}-${r.codigo_recurso || ''}-${r.orden !== undefined ? r.orden : index}`;
+            recursosOriginalesMap.set(clave, r);
+          });
+
+          // Identificar cambios en recursos
+          const recursosAgregarSubpartida: RecursoAPUEditable[] = [];
+          const recursosActualizarSubpartida: RecursoAPUEditable[] = [];
+          const recursosEliminarSubpartida: string[] = [];
+
+          for (const [clave, actual] of recursosActualesMap) {
+            const original = recursosOriginalesMap.get(clave);
+            if (!original) {
+              recursosAgregarSubpartida.push(actual);
+            } else if (recursoCambio(actual, original)) {
+              recursosActualizarSubpartida.push(actual);
+            }
+          }
+
+          for (const [clave, original] of recursosOriginalesMap) {
+            if (!recursosActualesMap.has(clave) && original.id_recurso_apu) {
+              recursosEliminarSubpartida.push(original.id_recurso_apu);
+            }
+          }
+
+          const hayCambiosRecursos = recursosAgregarSubpartida.length > 0 ||
+            recursosActualizarSubpartida.length > 0 ||
+            recursosEliminarSubpartida.length > 0;
+
+          // Si hay cambios, actualizar el APU de la subpartida
+          if (hayCambiosCantidad || hayCambiosRendimiento || hayCambiosJornada || hayCambiosRecursos) {
+            try {
+              // Obtener el APU de la subpartida
+              const subpartidaApuResponse = await executeQuery<{ getApuByPartida: any }>(
+                GET_APU_BY_PARTIDA_QUERY,
+                { id_partida: subpartida.id_partida_subpartida! }
+              );
+
+              if (!subpartidaApuResponse?.getApuByPartida) {
+                continue;
+              }
+
+              const subpartidaApu = subpartidaApuResponse.getApuByPartida;
+
+              // Actualizar rendimiento/jornada si cambió
+              if (hayCambiosRendimiento || hayCambiosJornada) {
+                await executeMutation<{ updateApu: any }>(
+                  UPDATE_APU_MUTATION,
+                  {
+                    id_apu: subpartidaApu.id_apu,
+                    rendimiento: subpartida.rendimientoSubpartida,
+                    jornada: subpartida.jornadaSubpartida,
+                  }
+                );
+              }
+
+              // Eliminar recursos
+              for (const idRecursoApu of recursosEliminarSubpartida) {
+                await executeMutation<{ removeRecursoFromApu: any }>(
+                  REMOVE_RECURSO_FROM_APU_MUTATION,
+                  {
+                    id_apu: subpartidaApu.id_apu,
+                    id_recurso_apu: idRecursoApu,
+                  }
+                );
+              }
+
+              // Agregar recursos nuevos
+              for (const recurso of recursosAgregarSubpartida) {
+                const recursoInput: RecursoApuInput = {
+                  recurso_id: recurso.recurso_id || undefined,
+                  codigo_recurso: recurso.codigo_recurso || '',
+                  descripcion: recurso.descripcion,
+                  unidad_medida: recurso.unidad_medida,
+                  tipo_recurso: recurso.tipo_recurso,
+                  tipo_recurso_codigo: recurso.tipo_recurso,
+                  id_precio_recurso: recurso.id_precio_recurso || undefined,
+                  precio_usuario: roundToTwo(recurso.precio || 0),
+                  tiene_precio_override: recurso.tiene_precio_override || false,
+                  precio_override: recurso.tiene_precio_override ? recurso.precio_override : undefined,
+                  cuadrilla: recurso.cuadrilla ? truncateToFour(recurso.cuadrilla) : undefined,
+                  cantidad: truncateToFour(recurso.cantidad),
+                  desperdicio_porcentaje: recurso.desperdicio_porcentaje || 0,
+                  cantidad_con_desperdicio: truncateToFour(recurso.cantidad * (1 + (recurso.desperdicio_porcentaje || 0) / 100)),
+                  parcial: roundToTwo(recurso.parcial || 0),
+                  orden: recurso.orden || 0,
+                };
+
+                await executeMutation<{ addRecursoToApu: any }>(
+                  ADD_RECURSO_TO_APU_MUTATION,
+                  {
+                    id_apu: subpartidaApu.id_apu,
+                    recurso: recursoInput,
+                  }
+                );
+              }
+
+              // Actualizar recursos modificados
+              for (const recurso of recursosActualizarSubpartida) {
+                if (!recurso.id_recurso_apu) continue;
+
+                const recursoInput: RecursoApuInput = {
+                  recurso_id: recurso.recurso_id || undefined,
+                  codigo_recurso: recurso.codigo_recurso || '',
+                  descripcion: recurso.descripcion,
+                  unidad_medida: recurso.unidad_medida,
+                  tipo_recurso: recurso.tipo_recurso,
+                  tipo_recurso_codigo: recurso.tipo_recurso,
+                  id_precio_recurso: recurso.id_precio_recurso || undefined,
+                  precio_usuario: roundToTwo(recurso.precio || 0),
+                  tiene_precio_override: recurso.tiene_precio_override || false,
+                  precio_override: recurso.tiene_precio_override ? recurso.precio_override : undefined,
+                  cuadrilla: recurso.cuadrilla ? truncateToFour(recurso.cuadrilla) : undefined,
+                  cantidad: truncateToFour(recurso.cantidad),
+                  desperdicio_porcentaje: recurso.desperdicio_porcentaje || 0,
+                  cantidad_con_desperdicio: truncateToFour(recurso.cantidad * (1 + (recurso.desperdicio_porcentaje || 0) / 100)),
+                  parcial: roundToTwo(recurso.parcial || 0),
+                  orden: recurso.orden || 0,
+                };
+
+                await executeMutation<{ updateRecursoInApu: any }>(
+                  UPDATE_RECURSO_IN_APU_MUTATION,
+                  {
+                    id_apu: subpartidaApu.id_apu,
+                    id_recurso_apu: recurso.id_recurso_apu,
+                    recurso: recursoInput,
+                  }
+                );
+              }
+
+              // Calcular el nuevo costo_directo localmente sumando los parciales de los recursos actualizados
+              const nuevoCostoDirecto = recursosActuales.reduce((suma, r) => suma + (r.parcial || 0), 0);
+              
+              // Actualizar el precio_unitario_subpartida en el recurso del APU padre
+              // Nota: Esto se hará después cuando se actualicen los recursos del APU padre
+              // El precio_unitario_subpartida se actualizará automáticamente cuando se recargue el APU
+
+              // Invalidar queries para refrescar datos
+              queryClient.invalidateQueries({ queryKey: ['apu'] });
+            } catch (error: any) {
+              // Continuar con las demás subpartidas aunque una falle
+            }
+          }
+        }
+
+      }
 
       if (apuExiste) {
         const apuParaActualizar = apuDataActualizado || apuData;
@@ -772,7 +1521,9 @@ export default function DetallePartidaPanel({
             Math.abs((editable.cuadrilla || 0) - (existente.cuadrilla || 0)) > tolerancia ||
             Math.abs((editable.desperdicio_porcentaje || 0) - (existente.desperdicio_porcentaje || 0)) > tolerancia ||
             editable.id_precio_recurso !== existente.id_precio_recurso ||
-            editable.orden !== existente.orden
+            editable.orden !== existente.orden ||
+            editable.tiene_precio_override !== existente.tiene_precio_override ||
+            Math.abs((editable.precio_override || 0) - (existente.precio_override || 0)) > tolerancia
           );
         };
 
@@ -785,27 +1536,39 @@ export default function DetallePartidaPanel({
         recursosNuevos = [];
         recursosActualizados = [];
 
-        for (const recursoEditable of recursosEditables.filter(r => r.recurso_id && r.descripcion)) {
+        for (const recursoEditable of recursosEditables.filter(r => (r.recurso_id && r.descripcion) || r.esSubpartida)) {
           const recursoExistente = recursosExistentes.find(
             r => r.id_recurso_apu === recursoEditable.id_recurso_apu
           );
 
-          const recursoInput: RecursoApuInput = {
-            recurso_id: recursoEditable.recurso_id,
-            codigo_recurso: recursoEditable.codigo_recurso,
+          const baseInput = {
+            codigo_recurso: recursoEditable.esSubpartida ? (recursoEditable.codigo_recurso || '') : recursoEditable.codigo_recurso,
             descripcion: recursoEditable.descripcion,
             unidad_medida: recursoEditable.unidad_medida,
             tipo_recurso: recursoEditable.tipo_recurso,
             tipo_recurso_codigo: recursoEditable.tipo_recurso,
-            id_precio_recurso: recursoEditable.id_precio_recurso,
-            precio_usuario: roundToTwo(recursoEditable.precio), // Asegurar que se guarde con 2 decimales
+            precio_usuario: recursoEditable.esSubpartida ? roundToTwo(recursoEditable.precio || 0) : roundToTwo(recursoEditable.precio), // Para subpartidas, precio_usuario tiene el valor calculado
             cuadrilla: recursoEditable.cuadrilla ? truncateToFour(recursoEditable.cuadrilla) : undefined, // Cuadrilla con 4 decimales
             cantidad: truncateToFour(recursoEditable.cantidad), // Cantidad con 4 decimales
             desperdicio_porcentaje: recursoEditable.desperdicio_porcentaje || 0,
             cantidad_con_desperdicio: truncateToFour(recursoEditable.cantidad * (1 + (recursoEditable.desperdicio_porcentaje || 0) / 100)),
-            parcial: roundToTwo(recursoEditable.parcial), // Parcial con 2 decimales
+            parcial: roundToTwo(recursoEditable.parcial), // Parcial calculado (cantidad × precio_unitario_subpartida para subpartidas)
             orden: recursoEditable.orden,
+            tiene_precio_override: recursoEditable.tiene_precio_override || false,
+            precio_override: recursoEditable.tiene_precio_override ? recursoEditable.precio_override : undefined,
           };
+
+          const recursoInput: RecursoApuInput = recursoEditable.esSubpartida ? {
+            ...baseInput,
+            id_partida_subpartida: recursoEditable.id_partida_subpartida,
+            precio_unitario_subpartida: roundToTwo(recursoEditable.precio_unitario_subpartida || 0),
+            recurso_id: recursoEditable.recurso_id || undefined,
+          } : {
+            ...baseInput,
+            recurso_id: recursoEditable.recurso_id,
+            id_precio_recurso: recursoEditable.id_precio_recurso,
+          };
+          
 
           if (recursoEditable.esNuevo || !recursoExistente) {
             recursosNuevos.push(recursoInput);
@@ -821,8 +1584,38 @@ export default function DetallePartidaPanel({
         // Ejecutar todas las operaciones en paralelo usando mutaciones directas (sin toasts automáticos)
         const operaciones: Promise<any>[] = [];
 
-        // Eliminar recursos
-        for (const recurso of recursosAEliminar) {
+        // Separar subpartidas existentes de recursos normales
+        const subpartidasAEliminar = recursosAEliminar.filter(
+          r => r.id_partida_subpartida && !r.id_partida_subpartida.startsWith('temp_')
+        );
+        const recursosNormalesAEliminar = recursosAEliminar.filter(
+          r => !r.id_partida_subpartida || r.id_partida_subpartida.startsWith('temp_')
+        );
+
+        // Primero obtener los APUs de las subpartidas en paralelo
+        const subpartidasConApu = await Promise.all(
+          subpartidasAEliminar.map(async (recurso) => {
+            try {
+              const subpartidaApuResponse = await executeQuery<{ getApuByPartida: any }>(
+                GET_APU_BY_PARTIDA_QUERY,
+                { id_partida: recurso.id_partida_subpartida! }
+              );
+              
+              return {
+                recurso,
+                apu: subpartidaApuResponse?.getApuByPartida || null,
+              };
+            } catch (error) {
+              return {
+                recurso,
+                apu: null,
+              };
+            }
+          })
+        );
+
+        // Eliminar recursos normales y subpartidas nuevas (temp_)
+        for (const recurso of recursosNormalesAEliminar) {
           operaciones.push(
             executeMutation<{ removeRecursoFromApu: any }>(
               REMOVE_RECURSO_FROM_APU_MUTATION,
@@ -835,6 +1628,37 @@ export default function DetallePartidaPanel({
               queryClient.invalidateQueries({ queryKey: ['apu'] });
             })
           );
+        }
+
+        // Eliminar subpartidas existentes: recurso del APU padre + partida de la subpartida
+        // Nota: No es necesario eliminar el APU manualmente porque PartidaService.eliminar 
+        // automáticamente elimina el APU asociado cuando se elimina la partida
+        for (const { recurso, apu } of subpartidasConApu) {
+          // 1. Eliminar el recurso del APU padre
+          operaciones.push(
+            executeMutation<{ removeRecursoFromApu: any }>(
+              REMOVE_RECURSO_FROM_APU_MUTATION,
+              {
+                id_apu: apuParaActualizar.id_apu,
+                id_recurso_apu: recurso.id_recurso_apu,
+              }
+            )
+          );
+
+          // 2. Eliminar la partida de la subpartida
+          // PartidaService.eliminar automáticamente eliminará el APU asociado
+          if (recurso.id_partida_subpartida) {
+            operaciones.push(
+              executeMutation<{ deletePartida: any }>(
+                DELETE_PARTIDA_MUTATION,
+                {
+                  id_partida: recurso.id_partida_subpartida,
+                }
+              ).catch((error) => {
+                // Si falla eliminar la partida, continuar
+              })
+            );
+          }
         }
 
         // Agregar recursos nuevos
@@ -883,7 +1707,132 @@ export default function DetallePartidaPanel({
         });
       }
 
-      await refetchApu();
+      // Refetch del APU para obtener los datos actualizados
+      const { data: apuDataRefetch } = await refetchApu();
+      
+      // Si hay datos refetchados, recargar el estado local
+      if (apuDataRefetch) {
+        const nuevoRendimiento = apuDataRefetch.rendimiento || 1.0;
+        const nuevaJornada = apuDataRefetch.jornada || 8;
+        setRendimiento(nuevoRendimiento);
+        setJornada(nuevaJornada);
+        setRendimientoInput(String(nuevoRendimiento));
+        setJornadaInput(String(nuevaJornada));
+        
+        // Recargar recursos con subpartidas
+        const recursosEditablePromises = apuDataRefetch.recursos.map(async (r: any, index: number) => {
+          const tieneIdSubpartida = !!(r.id_partida_subpartida && typeof r.id_partida_subpartida === 'string' && r.id_partida_subpartida.trim() !== '');
+          const noTieneRecursoId = !r.recurso_id || r.recurso_id.trim() === '';
+          const tienePrecioUnitarioSubpartida = r.precio_unitario_subpartida !== undefined && r.precio_unitario_subpartida !== null;
+          const esSubpartida = tieneIdSubpartida || (noTieneRecursoId && tienePrecioUnitarioSubpartida);
+
+          const precioFinal = esSubpartida && r.precio_unitario_subpartida !== undefined 
+            ? r.precio_unitario_subpartida 
+            : (r.precio || 0);
+
+          const recursoBase: RecursoAPUEditable = {
+            id_recurso_apu: r.id_recurso_apu,
+            recurso_id: r.recurso_id || '',
+            codigo_recurso: r.codigo_recurso || '',
+            descripcion: r.descripcion,
+            tipo_recurso: r.tipo_recurso,
+            unidad_medida: r.unidad_medida,
+            id_precio_recurso: r.id_precio_recurso,
+            precio: precioFinal,
+            cuadrilla: r.cuadrilla,
+            cantidad: r.cantidad,
+            desperdicio_porcentaje: r.desperdicio_porcentaje || 0,
+            parcial: 0,
+            orden: r.orden,
+            enEdicion: false,
+            esNuevo: false,
+            esSubpartida: esSubpartida,
+            id_partida_subpartida: r.id_partida_subpartida || undefined,
+            precio_unitario_subpartida: r.precio_unitario_subpartida,
+            recursosSubpartida: [],
+            rendimientoSubpartida: undefined,
+            jornadaSubpartida: undefined,
+          };
+
+          recursoBase.parcial = calcularParcial(recursoBase);
+
+          // Si es subpartida, cargar su APU para obtener recursos, rendimiento y jornada
+          if (esSubpartida && r.id_partida_subpartida) {
+            try {
+              const subpartidaApuResponse = await executeQuery<{ getApuByPartida: any }>(
+                GET_APU_BY_PARTIDA_QUERY,
+                { id_partida: r.id_partida_subpartida }
+              );
+
+              if (subpartidaApuResponse?.getApuByPartida) {
+                const subpartidaApu = subpartidaApuResponse.getApuByPartida;
+
+                const recursosSubpartida: RecursoAPUEditable[] = (subpartidaApu.recursos || []).map((sr: any) => {
+                  const recursoSub: RecursoAPUEditable = {
+                    id_recurso_apu: sr.id_recurso_apu,
+                    recurso_id: sr.recurso_id || '',
+                    codigo_recurso: sr.codigo_recurso || '',
+                    descripcion: sr.descripcion,
+                    tipo_recurso: sr.tipo_recurso,
+                    unidad_medida: sr.unidad_medida,
+                    id_precio_recurso: sr.id_precio_recurso,
+                    precio: sr.precio || 0,
+                    cuadrilla: sr.cuadrilla,
+                    cantidad: sr.cantidad,
+                    desperdicio_porcentaje: sr.desperdicio_porcentaje || 0,
+                    parcial: 0,
+                    orden: sr.orden,
+                    enEdicion: false,
+                    esNuevo: false,
+                    esSubpartida: false,
+                  };
+
+                  recursoSub.parcial = calcularParcial(recursoSub);
+                  return recursoSub;
+                });
+
+                recursoBase.recursosSubpartida = recursosSubpartida;
+                recursoBase.rendimientoSubpartida = subpartidaApu.rendimiento || 1.0;
+                recursoBase.jornadaSubpartida = subpartidaApu.jornada || 8;
+
+                try {
+                  const partidaSubpartidaResponse = await executeQuery<{ getPartida: any }>(
+                    GET_PARTIDA_QUERY,
+                    { id_partida: r.id_partida_subpartida }
+                  );
+
+                  if (partidaSubpartidaResponse?.getPartida) {
+                    const partidaSubpartida = partidaSubpartidaResponse.getPartida;
+                    recursoBase.id_partida_original = partidaSubpartida.id_partida_padre || id_partida || undefined;
+                    if (partidaSubpartida.descripcion) {
+                      recursoBase.descripcion = partidaSubpartida.descripcion;
+                    }
+                  } else {
+                    recursoBase.id_partida_original = id_partida || undefined;
+                  }
+                } catch (error) {
+                  recursoBase.id_partida_original = id_partida || undefined;
+                }
+              }
+            } catch (error) {
+              // Error silencioso al cargar APU de subpartida
+            }
+          }
+
+          return recursoBase;
+        });
+
+        const recursosEditable = await Promise.all(recursosEditablePromises);
+        setRecursosEditables(recursosEditable);
+
+        // Actualizar valores originales con los datos recargados
+        setValoresOriginales({
+          rendimiento: nuevoRendimiento,
+          jornada: nuevaJornada,
+          recursos: JSON.parse(JSON.stringify(recursosEditable))
+        });
+      }
+      
       setHasChanges(false);
       
       // Invalidar y refetch query de estructura del presupuesto para actualizar totales
@@ -895,15 +1844,6 @@ export default function DetallePartidaPanel({
         // Invalidar y refetch explícito para asegurar que se muestren los totales actualizados
         await queryClient.invalidateQueries({ queryKey: ['estructura-presupuesto', id_presupuesto] });
         await queryClient.refetchQueries({ queryKey: ['estructura-presupuesto', id_presupuesto] });
-      }
-      
-      // Actualizar valores originales después de guardar
-      if (apuData) {
-        setValoresOriginales({
-          rendimiento: rendimiento,
-          jornada: jornada,
-          recursos: JSON.parse(JSON.stringify(recursosEditables))
-        });
       }
       
       // Mostrar un solo toast de éxito
@@ -923,21 +1863,26 @@ export default function DetallePartidaPanel({
 
   const totales = useMemo(() => {
     return recursosEditables.reduce((acc, r) => ({
-      costo_materiales: acc.costo_materiales + (r.tipo_recurso === 'MATERIAL' ? r.parcial : 0),
+      costo_materiales: acc.costo_materiales + (r.tipo_recurso === 'MATERIAL' && !r.esSubpartida ? r.parcial : 0),
       costo_mano_obra: acc.costo_mano_obra + (r.tipo_recurso === 'MANO_OBRA' ? r.parcial : 0),
       costo_equipos: acc.costo_equipos + (r.tipo_recurso === 'EQUIPO' ? r.parcial : 0),
       costo_subcontratos: acc.costo_subcontratos + (r.tipo_recurso === 'SUBCONTRATO' ? r.parcial : 0),
+      costo_subpartidas: acc.costo_subpartidas + (r.esSubpartida ? (r.precio || 0) : 0),
       costo_directo: acc.costo_directo + r.parcial,
     }), {
       costo_materiales: 0,
       costo_mano_obra: 0,
       costo_equipos: 0,
       costo_subcontratos: 0,
+      costo_subpartidas: 0,
       costo_directo: 0,
     });
   }, [recursosEditables]);
 
-  const getTipoRecursoColor = (tipo: string) => {
+  const getTipoRecursoColor = (tipo: string, esSubpartida?: boolean) => {
+    if (esSubpartida) {
+      return 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400';
+    }
     switch (tipo) {
       case 'MATERIAL':
         return 'bg-blue-500/10 text-blue-600 dark:text-blue-400';
@@ -952,7 +1897,10 @@ export default function DetallePartidaPanel({
     }
   };
 
-  const getTipoRecursoAbrev = (tipo: string) => {
+  const getTipoRecursoAbrev = (tipo: string, esSubpartida?: boolean) => {
+    if (esSubpartida) {
+      return 'SP';
+    }
     switch (tipo) {
       case 'MATERIAL':
         return 'MT';
@@ -1261,13 +2209,33 @@ export default function DetallePartidaPanel({
                             className="text-[10px]"
                           />
                         ) : (
-                          <div className="flex items-center gap-1">
-                            {recurso.tipo_recurso && (
-                              <span className={`px-1 py-0.5 rounded text-[8px] font-medium ${getTipoRecursoColor(recurso.tipo_recurso)}`}>
-                                {getTipoRecursoAbrev(recurso.tipo_recurso)}
+                          <div
+                            className={`flex items-center gap-1 ${recurso.esSubpartida && modoReal === 'edicion' ? 'cursor-pointer' : ''}`}
+                            onClick={recurso.esSubpartida ? () => {
+                              // Abrir modal con la subpartida (para ver en modo lectura o editar en modo edición)
+                              if (onEditarSubPartida && recurso.id_partida_subpartida) {
+                                // Pasar TODOS los datos guardados: recursos, id_partida_original, rendimiento, jornada, descripcion
+                                onEditarSubPartida(
+                                  recurso.id_partida_subpartida,
+                                  recurso.recursosSubpartida || [],
+                                  recurso.id_partida_original,
+                                  recurso.rendimientoSubpartida,
+                                  recurso.jornadaSubpartida,
+                                  recurso.descripcion
+                                );
+                              }
+                            } : undefined}
+                            title={recurso.esSubpartida ? (modoReal === 'edicion' ? 'Clic para editar subpartida' : 'Clic para ver subpartida') : ''}
+                          >
+                            {(recurso.tipo_recurso || recurso.esSubpartida) && (
+                              <span className={`px-1 py-0.5 rounded text-[8px] font-medium ${getTipoRecursoColor(recurso.tipo_recurso || 'MATERIAL', recurso.esSubpartida)}`}>
+                                {getTipoRecursoAbrev(recurso.tipo_recurso || 'MATERIAL', recurso.esSubpartida)}
                               </span>
                             )}
-                            <span className="text-[var(--text-primary)] truncate" title={recurso.descripcion || ''}>
+                            <span
+                              className={`truncate ${recurso.esSubpartida && modoReal === 'edicion' ? 'text-[var(--text-primary)]' : 'text-[var(--text-primary)]'}`}
+                              title={recurso.descripcion || ''}
+                            >
                               {recurso.descripcion || '—'}
                             </span>
                           </div>
@@ -1286,16 +2254,20 @@ export default function DetallePartidaPanel({
                         )}
                       </td>
                       <td className="px-1 py-1 text-center">
-                        {/* Mostrar cuadrilla solo para MO con unidad "hh" y EQUIPO con unidad "hm" */}
+                        {/* No mostrar cuadrilla para subpartidas */}
                         {(() => {
+                          if (recurso.esSubpartida) {
+                            return <span className="text-[10px] text-[var(--text-secondary)] italic"></span>;
+                          }
+
                           const unidadMedidaLower = recurso.unidad_medida?.toLowerCase() || '';
                           const debeMostrarCuadrilla = (recurso.tipo_recurso === 'MANO_OBRA' && unidadMedidaLower === 'hh') ||
                             (recurso.tipo_recurso === 'EQUIPO' && unidadMedidaLower === 'hm');
-                          
+
                           if (!debeMostrarCuadrilla) {
                             return <span className="text-[10px] text-[var(--text-secondary)] italic"></span>;
                           }
-                          
+
                           return modoReal === 'edicion' ? (
                             <Input
                               type="number"
@@ -1360,66 +2332,125 @@ export default function DetallePartidaPanel({
                         )}
                       </td>
                       <td className="px-1 py-1 text-right">
-                        {modoReal === 'edicion' ? (
-                          <Input
-                            type="number"
-                            step="0.0001"
-                            min="0"
-                            value={recurso.precio ?? ''}
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              if (value === '' || value === '-') {
-                                handleUpdateRecurso(recurso.id_recurso_apu, 'precio', 0);
-                                return;
-                              }
-                              const numValue = parseFloat(value);
-                              if (!isNaN(numValue) && numValue >= 0) {
-                                // Asegurar que se muestre con exactamente 2 decimales
-                                const roundedValue = roundToTwo(numValue);
-                                handleUpdateRecurso(recurso.id_recurso_apu, 'precio', roundedValue);
-                              } else {
-                                // Si no es válido, restaurar el valor anterior
-                                handleUpdateRecurso(recurso.id_recurso_apu, 'precio', recurso.precio || 0);
-                              }
-                            }}
-                            onKeyDown={(e) => {
-                              const key = e.key;
-                              const currentValue = e.currentTarget.value;
-                              const parts = currentValue.split('.');
-                              const hasDecimal = parts.length > 1;
-                              const decimalsCount = hasDecimal ? parts[1].length : 0;
-                              
-                              // Prevenir entrada de caracteres no numéricos excepto punto y teclas de control
-                              const isNumber = /^\d$/.test(key);
-                              const isDecimal = key === '.' && !hasDecimal;
-                              const isControl = ['Backspace', 'Delete', 'Tab', 'Escape', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(key);
-                              const isPaste = (e.ctrlKey || e.metaKey) && key === 'v';
-                              
-                              // Si ya hay 2 decimales y se intenta escribir un número, bloquear
-                              if (hasDecimal && decimalsCount >= 2 && isNumber && !isControl) {
-                                e.preventDefault();
-                                return;
-                              }
-                              
-                              if (!isNumber && !isDecimal && !isControl && !isPaste) {
-                                e.preventDefault();
-                              }
-                            }}
-                            onPaste={(e) => {
-                              e.preventDefault();
-                              const pastedText = e.clipboardData.getData('text');
-                              const numValue = parseFloat(pastedText);
-                              if (!isNaN(numValue) && numValue >= 0) {
-                                const roundedValue = roundToTwo(numValue);
-                                handleUpdateRecurso(recurso.id_recurso_apu, 'precio', roundedValue);
-                              }
-                            }}
-                            className="text-[10px] h-6 w-full text-right px-1"
-                            title="Precio unitario (máximo 2 decimales)"
-                          />
-                        ) : (
-                          <span className="text-[10px] text-[var(--text-primary)]">S/ {recurso.precio !== undefined && recurso.precio !== null ? recurso.precio.toFixed(2) : '—'}</span>
-                        )}
+                        {(() => {
+                          // Para subpartidas, mostrar precio_unitario_subpartida (no editable)
+                          if (recurso.esSubpartida && recurso.precio_unitario_subpartida !== undefined) {
+                            return (
+                              <span className="text-[10px] text-[var(--text-primary)]">
+                                S/ {recurso.precio_unitario_subpartida.toFixed(2)}
+                              </span>
+                            );
+                          }
+                          
+                          return modoReal === 'edicion' ? (
+                            <div className="flex items-center gap-1 justify-end">
+                              <Input
+                                type="number"
+                                step="0.0001"
+                                min="0"
+                                value={recurso.precio ?? ''}
+                                onChange={(e) => {
+                                  const value = e.target.value;
+                                  if (value === '' || value === '-') {
+                                    handleUpdateRecurso(recurso.id_recurso_apu, 'precio', 0);
+                                    // Si tiene override activado, actualizar también precio_override
+                                    if (recurso.tiene_precio_override) {
+                                      handleUpdateRecurso(recurso.id_recurso_apu, 'precio_override', 0 as number);
+                                    }
+                                    return;
+                                  }
+                                  const numValue = parseFloat(value);
+                                  if (!isNaN(numValue) && numValue >= 0) {
+                                    // Asegurar que se muestre con exactamente 2 decimales
+                                    const roundedValue = roundToTwo(numValue);
+                                    handleUpdateRecurso(recurso.id_recurso_apu, 'precio', roundedValue);
+                                    // Si tiene override activado, actualizar también precio_override
+                                    if (recurso.tiene_precio_override) {
+                                      handleUpdateRecurso(recurso.id_recurso_apu, 'precio_override', roundedValue);
+                                    }
+                                  } else {
+                                    // Si no es válido, restaurar el valor anterior
+                                    handleUpdateRecurso(recurso.id_recurso_apu, 'precio', recurso.precio || 0);
+                                  }
+                                }}
+                                onKeyDown={(e) => {
+                                  const key = e.key;
+                                  const currentValue = e.currentTarget.value;
+                                  const parts = currentValue.split('.');
+                                  const hasDecimal = parts.length > 1;
+                                  const decimalsCount = hasDecimal ? parts[1].length : 0;
+                                  
+                                  // Prevenir entrada de caracteres no numéricos excepto punto y teclas de control
+                                  const isNumber = /^\d$/.test(key);
+                                  const isDecimal = key === '.' && !hasDecimal;
+                                  const isControl = ['Backspace', 'Delete', 'Tab', 'Escape', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(key);
+                                  const isPaste = (e.ctrlKey || e.metaKey) && key === 'v';
+                                  
+                                  // Si ya hay 2 decimales y se intenta escribir un número, bloquear
+                                  if (hasDecimal && decimalsCount >= 2 && isNumber && !isControl) {
+                                    e.preventDefault();
+                                    return;
+                                  }
+                                  
+                                  if (!isNumber && !isDecimal && !isControl && !isPaste) {
+                                    e.preventDefault();
+                                  }
+                                }}
+                                onPaste={(e) => {
+                                  e.preventDefault();
+                                  const pastedText = e.clipboardData.getData('text');
+                                  const numValue = parseFloat(pastedText);
+                                  if (!isNaN(numValue) && numValue >= 0) {
+                                    const roundedValue = roundToTwo(numValue);
+                                    handleUpdateRecurso(recurso.id_recurso_apu, 'precio', roundedValue);
+                                    // Si tiene override activado, actualizar también precio_override
+                                    if (recurso.tiene_precio_override) {
+                                      handleUpdateRecurso(recurso.id_recurso_apu, 'precio_override', roundedValue);
+                                    }
+                                  }
+                                }}
+                                className="text-[10px] h-6 w-20 text-right px-1"
+                                title="Precio unitario (máximo 2 decimales)"
+                              />
+                              <label className="flex items-center gap-1 cursor-pointer group" title="Precio único (no afecta precio compartido)">
+                                <input
+                                  type="checkbox"
+                                  checked={recurso.tiene_precio_override || false}
+                                  onChange={(e) => {
+                                    const checked = e.target.checked;
+                                    handleUpdateRecurso(recurso.id_recurso_apu, 'tiene_precio_override', checked);
+                                    
+                                    // Si se activa, copiar el precio actual a precio_override
+                                    if (checked) {
+                                      handleUpdateRecurso(recurso.id_recurso_apu, 'precio_override', recurso.precio || 0);
+                                    } else {
+                                      // Si se desactiva, limpiar precio_override
+                                      handleUpdateRecurso(recurso.id_recurso_apu, 'precio_override', null);
+                                    }
+                                  }}
+                                  className="w-3 h-3 cursor-pointer accent-[var(--primary-color)]"
+                                />
+                                <span className="text-[8px] text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">
+                                  Único
+                                </span>
+                              </label>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1 justify-end">
+                              <span className="text-[10px] text-[var(--text-primary)]">
+                                {recurso.esSubpartida
+                                  ? `S/ ${recurso.precio_unitario_subpartida !== undefined && recurso.precio_unitario_subpartida !== null ? recurso.precio_unitario_subpartida.toFixed(2) : '—'}`
+                                  : `S/ ${recurso.precio !== undefined && recurso.precio !== null ? recurso.precio.toFixed(2) : '—'}`
+                                }
+                              </span>
+                              {!recurso.esSubpartida && recurso.tiene_precio_override && (
+                                <span className="text-[8px] text-[var(--text-secondary)] italic" title="Precio único">
+                                  (Único)
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td className="px-1 py-1 text-right font-medium text-[var(--text-primary)]">
                         <span>S/ {recurso.parcial !== undefined && recurso.parcial !== null ? roundToTwo(recurso.parcial).toFixed(2) : '0.00'}</span>

@@ -18,7 +18,7 @@ export interface AprobacionPresupuesto {
   id_presupuesto: string;
   id_grupo_version?: string;
   id_proyecto: string;
-  tipo_aprobacion: 'LICITACION_A_CONTRACTUAL' | 'CONTRACTUAL_A_META' | 'NUEVA_VERSION_META';
+  tipo_aprobacion: 'LICITACION_A_CONTRACTUAL' | 'CONTRACTUAL_A_META' | 'NUEVA_VERSION_META' | 'OFICIALIZAR_META';
   usuario_solicitante_id: string;
   usuario_aprobador_id?: string;
   estado: 'PENDIENTE' | 'APROBADO' | 'RECHAZADO' | 'CANCELADO';
@@ -196,12 +196,14 @@ export function useRechazarPresupuesto() {
       queryClient.invalidateQueries({ queryKey: ['aprobaciones'] });
       queryClient.invalidateQueries({ queryKey: ['presupuestos', 'fase', 'LICITACION'] });
       queryClient.invalidateQueries({ queryKey: ['presupuestos', 'fase', 'CONTRACTUAL'] });
+      queryClient.invalidateQueries({ queryKey: ['presupuestos', 'fase', 'META'] });
       queryClient.invalidateQueries({ queryKey: ['presupuestos', 'proyecto', data.id_proyecto] });
       queryClient.invalidateQueries({ queryKey: ['presupuestos'] });
-      toast.success('Presupuesto rechazado');
+      toast.success('Presupuesto rechazado exitosamente');
     },
     onError: (error: any) => {
-      toast.error(error?.message || 'Error al rechazar el presupuesto');
+      const mensajeError = error?.message || 'Error al rechazar el presupuesto';
+      toast.error(mensajeError);
     },
   });
 }

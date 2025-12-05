@@ -10,7 +10,6 @@ export const CREATE_PARTIDA_MUTATION = `
     $id_partida_padre: String
     $nivel_partida: Int!
     $numero_item: String!
-    $codigo_partida: String!
     $descripcion: String!
     $unidad_medida: String!
     $metrado: Float!
@@ -26,7 +25,6 @@ export const CREATE_PARTIDA_MUTATION = `
       id_partida_padre: $id_partida_padre
       nivel_partida: $nivel_partida
       numero_item: $numero_item
-      codigo_partida: $codigo_partida
       descripcion: $descripcion
       unidad_medida: $unidad_medida
       metrado: $metrado
@@ -43,7 +41,6 @@ export const CREATE_PARTIDA_MUTATION = `
       id_partida_padre
       nivel_partida
       numero_item
-      codigo_partida
       descripcion
       unidad_medida
       metrado
@@ -62,7 +59,6 @@ export const UPDATE_PARTIDA_MUTATION = `
     $id_partida_padre: String
     $nivel_partida: Int
     $numero_item: String
-    $codigo_partida: String
     $descripcion: String
     $unidad_medida: String
     $metrado: Float
@@ -77,7 +73,6 @@ export const UPDATE_PARTIDA_MUTATION = `
       id_partida_padre: $id_partida_padre
       nivel_partida: $nivel_partida
       numero_item: $numero_item
-      codigo_partida: $codigo_partida
       descripcion: $descripcion
       unidad_medida: $unidad_medida
       metrado: $metrado
@@ -94,7 +89,6 @@ export const UPDATE_PARTIDA_MUTATION = `
       id_partida_padre
       nivel_partida
       numero_item
-      codigo_partida
       descripcion
       unidad_medida
       metrado

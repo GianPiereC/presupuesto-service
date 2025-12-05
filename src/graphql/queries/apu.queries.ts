@@ -20,6 +20,7 @@ export const GET_APU_BY_PARTIDA_QUERY = `
       recursos {
         id_recurso_apu
         recurso_id
+        id_partida_subpartida
         codigo_recurso
         descripcion
         unidad_medida
@@ -31,6 +32,9 @@ export const GET_APU_BY_PARTIDA_QUERY = `
         desperdicio_porcentaje
         cantidad_con_desperdicio
         parcial
+        precio_unitario_subpartida
+        tiene_precio_override
+        precio_override
         orden
       }
     }
@@ -55,6 +59,7 @@ export const GET_APU_QUERY = `
       recursos {
         id_recurso_apu
         recurso_id
+        id_partida_subpartida
         codigo_recurso
         descripcion
         unidad_medida
@@ -66,6 +71,9 @@ export const GET_APU_QUERY = `
         desperdicio_porcentaje
         cantidad_con_desperdicio
         parcial
+        precio_unitario_subpartida
+        tiene_precio_override
+        precio_override
         orden
       }
     }
@@ -90,6 +98,7 @@ export const GET_APUS_BY_PRESUPUESTO_QUERY = `
       recursos {
         id_recurso_apu
         recurso_id
+        id_partida_subpartida
         codigo_recurso
         descripcion
         unidad_medida
@@ -101,6 +110,9 @@ export const GET_APUS_BY_PRESUPUESTO_QUERY = `
         desperdicio_porcentaje
         cantidad_con_desperdicio
         parcial
+        precio_unitario_subpartida
+        tiene_precio_override
+        precio_override
         orden
       }
     }

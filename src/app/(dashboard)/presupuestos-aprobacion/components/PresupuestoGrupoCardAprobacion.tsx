@@ -1,9 +1,12 @@
 'use client';
 
 import { DollarSign, Calendar, CheckCircle2, XCircle, ArrowRight } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useAprobarPresupuesto, useRechazarPresupuesto } from '@/hooks/useAprobaciones';
 import { useConfirm } from '@/context/confirm-context';
+import Modal from '@/components/ui/modal';
+import { Textarea } from '@/components/ui/textarea';
+import { Button } from '@/components/ui/button';
 
 interface PresupuestoGrupoCardAprobacionProps {
   id_aprobacion: string;
@@ -22,7 +25,7 @@ interface PresupuestoGrupoCardAprobacionProps {
     total_presupuesto: number;
     descripcion_version?: string;
   }>;
-  tipoAprobacion: 'LICITACION_A_CONTRACTUAL' | 'CONTRACTUAL_A_META' | 'NUEVA_VERSION_META';
+  tipoAprobacion: 'LICITACION_A_CONTRACTUAL' | 'CONTRACTUAL_A_META' | 'NUEVA_VERSION_META' | 'OFICIALIZAR_META';
 }
 
 export default function PresupuestoGrupoCardAprobacion({
@@ -35,6 +38,10 @@ export default function PresupuestoGrupoCardAprobacion({
   const aprobarMutation = useAprobarPresupuesto();
   const rechazarMutation = useRechazarPresupuesto();
   const { confirm } = useConfirm();
+  
+  // Estados para el modal de rechazo
+  const [isRechazarModalOpen, setIsRechazarModalOpen] = useState(false);
+  const [comentarioRechazo, setComentarioRechazo] = useState('');
 
   // Ordenar versiones por número de versión (más reciente primero)
   const versionesOrdenadas = useMemo(() => {
@@ -57,26 +64,27 @@ export default function PresupuestoGrupoCardAprobacion({
   };
 
   const handleRechazar = () => {
-    // Solicitar comentario usando prompt
-    const comentario = window.prompt('Ingrese el motivo del rechazo (obligatorio):');
-    
-    if (!comentario || comentario.trim() === '') {
-      return; // Cancelar si no hay comentario
+    setComentarioRechazo('');
+    setIsRechazarModalOpen(true);
+  };
+
+  const handleConfirmarRechazar = () => {
+    if (!comentarioRechazo.trim()) {
+      return; // No hacer nada si no hay comentario
     }
 
-    confirm({
-      title: 'Rechazar Presupuesto',
-      message: `¿Está seguro de que desea rechazar este presupuesto?\n\nMotivo: ${comentario.trim()}`,
-      confirmText: 'Rechazar',
-      cancelText: 'Cancelar',
-      variant: 'destructive',
-      onConfirm: () => {
-        rechazarMutation.mutate({
-          id_aprobacion,
-          comentario: comentario.trim(),
-        });
+    rechazarMutation.mutate(
+      {
+        id_aprobacion,
+        comentario: comentarioRechazo.trim(),
       },
-    });
+      {
+        onSuccess: () => {
+          setIsRechazarModalOpen(false);
+          setComentarioRechazo('');
+        },
+      }
+    );
   };
 
   const totalVersiones = versiones.length;
@@ -92,10 +100,15 @@ export default function PresupuestoGrupoCardAprobacion({
         from: 'Contractual',
         to: 'Meta',
       };
-    } else {
+    } else if (tipoAprobacion === 'NUEVA_VERSION_META') {
       return {
         from: 'Meta Borrador',
         to: 'Aprobado',
+      };
+    } else {
+      return {
+        from: 'Meta Aprobado',
+        to: 'Vigente',
       };
     }
   };
@@ -105,6 +118,8 @@ export default function PresupuestoGrupoCardAprobacion({
       return 'bg-orange-500/10 text-orange-600 dark:text-orange-400';
     } else if (tipoAprobacion === 'CONTRACTUAL_A_META') {
       return 'bg-blue-500/10 text-blue-600 dark:text-blue-400';
+    } else if (tipoAprobacion === 'OFICIALIZAR_META') {
+      return 'bg-purple-500/10 text-purple-600 dark:text-purple-400';
     } else {
       return 'bg-green-500/10 text-green-600 dark:text-green-400';
     }
@@ -143,6 +158,8 @@ export default function PresupuestoGrupoCardAprobacion({
                         ? 'bg-orange-500/10 text-orange-600 dark:text-orange-400'
                         : tipoAprobacion === 'CONTRACTUAL_A_META'
                         ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                        : tipoAprobacion === 'OFICIALIZAR_META'
+                        ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400'
                         : 'bg-green-500/10 text-green-600 dark:text-green-400'
                     }`}>
                       V{version.version || 1}
@@ -201,6 +218,68 @@ export default function PresupuestoGrupoCardAprobacion({
           </div>
         </div>
       )}
+
+      {/* Modal para rechazar */}
+      <Modal
+        isOpen={isRechazarModalOpen}
+        onClose={() => {
+          setIsRechazarModalOpen(false);
+          setComentarioRechazo('');
+        }}
+        title="Rechazar Presupuesto"
+        size="md"
+      >
+        <div className="space-y-4">
+          <div>
+            <p className="text-sm text-[var(--text-secondary)]">
+              ¿Está seguro de que desea rechazar este presupuesto?
+            </p>
+            {versionesOrdenadas.length > 0 && versionesOrdenadas[0] && (
+              <p className="text-xs text-[var(--text-secondary)] mt-2">
+                Versión: <strong>V{versionesOrdenadas[0].version || ''}</strong>
+                {' • '}
+                Monto: <strong>S/ {(versionesOrdenadas[0].total_presupuesto || 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">
+              Motivo del rechazo <span className="text-red-500">*</span>
+            </label>
+            <Textarea
+              value={comentarioRechazo}
+              onChange={(e) => setComentarioRechazo(e.target.value)}
+              placeholder="Ingrese el motivo del rechazo (obligatorio)..."
+              rows={4}
+              className="w-full"
+            />
+            {!comentarioRechazo.trim() && (
+              <p className="text-xs text-red-500 mt-1">El motivo del rechazo es obligatorio</p>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-3 pt-4 border-t border-[var(--border-color)]">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setIsRechazarModalOpen(false);
+                setComentarioRechazo('');
+              }}
+              disabled={rechazarMutation.isPending}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmarRechazar}
+              disabled={rechazarMutation.isPending || !comentarioRechazo.trim()}
+            >
+              {rechazarMutation.isPending ? 'Rechazando...' : 'Rechazar'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

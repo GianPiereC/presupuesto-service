@@ -52,23 +52,23 @@ function EstructuraContent() {
       return 'lectura';
     }
     
-    // Si el presupuesto está en revisión, modo lectura
+    // Si el presupuesto está en revisión, modo lectura (no se puede editar)
     if (presupuesto?.estado === 'en_revision') {
       return 'lectura';
     }
     
-    // Si el presupuesto está rechazado, modo lectura
+    // Si el presupuesto está rechazado, modo lectura (no se puede editar)
     if (presupuesto?.estado === 'rechazado') {
       return 'lectura';
     }
     
-    // Si está en borrador, modo edición
-    if (presupuesto?.estado === 'borrador') {
+    // Si está en borrador o no tiene estado definido, modo edición (permite editar)
+    if (presupuesto?.estado === 'borrador' || !presupuesto?.estado) {
       return 'edicion';
     }
     
-    // Por defecto, modo lectura (por seguridad)
-    return 'lectura';
+    // Por defecto, modo edición para permitir editar versiones en borrador
+    return 'edicion';
   }, [searchParams, presupuesto?.estado, presupuesto?.estado_aprobacion]);
 
   return (

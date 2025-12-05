@@ -1,13 +1,13 @@
 'use client';
 
-import { DollarSign, Calendar, FileText, Building2, ChevronDown, ChevronUp, Layers, ListTree, Copy, Send } from 'lucide-react';
+import { DollarSign, Calendar, FileText, Building2, ChevronDown, ChevronUp, Layers, ListTree, Copy, Send, CheckCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import Modal from '@/components/ui/modal';
 import type { Presupuesto } from '@/hooks/usePresupuestos';
 import { useState, useMemo, useEffect } from 'react';
 import DetalleVersionModal from '../../presupuestos-licitaciones/components/DetalleVersionModal';
 import CrearVersionForm from '../../presupuestos-licitaciones/components/CrearVersionForm';
-import { useCreateVersionDesdeVersion, useEnviarVersionMetaAAprobacion } from '@/hooks';
+import { useCreateVersionDesdeVersion, useEnviarVersionMetaAAprobacion, useEnviarVersionMetaAOficializacion } from '@/hooks';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 
@@ -31,31 +31,42 @@ export default function PresupuestoGrupoCardMeta({
   const [isDetalleModalOpen, setIsDetalleModalOpen] = useState(false);
   const [isCrearVersionModalOpen, setIsCrearVersionModalOpen] = useState(false);
   const [isEnviarAprobacionModalOpen, setIsEnviarAprobacionModalOpen] = useState(false);
+  const [isOficializarModalOpen, setIsOficializarModalOpen] = useState(false);
   const [versionSeleccionada, setVersionSeleccionada] = useState<Presupuesto | null>(null);
   const [versionParaAprobacion, setVersionParaAprobacion] = useState<Presupuesto | null>(null);
+  const [versionParaOficializar, setVersionParaOficializar] = useState<Presupuesto | null>(null);
   const [comentarioAprobacion, setComentarioAprobacion] = useState('');
+  const [comentarioOficializar, setComentarioOficializar] = useState('');
   const [tabActivo, setTabActivo] = useState<TabActivo>('aprobadas');
   const createVersion = useCreateVersionDesdeVersion();
   const enviarAprobacion = useEnviarVersionMetaAAprobacion();
+  const enviarOficializacion = useEnviarVersionMetaAOficializacion();
 
   // Filtrar y ordenar versiones por estado para los tabs
   // "Aprobadas": orden ascendente (V1, V2, V3...) para mantener orden cronológico
   // "Por Aprobar": orden ascendente (V1, V2, V3...) para consistencia
   const versionesPorAprobar = useMemo(() => {
     return [...versiones]
-      .filter(v => 
-        v.fase === 'META' && 
-        (v.estado === 'borrador' || v.estado === 'en_revision' || v.estado === 'rechazado')
-      )
+      .filter(v => {
+        if (v.fase !== 'META') return false;
+        // Excluir versiones en revisión para oficialización (estas se muestran en tab aprobadas)
+        if (v.estado === 'en_revision' && v.estado_aprobacion?.tipo === 'OFICIALIZAR_META') return false;
+        // Incluir otras versiones en revisión, borrador o rechazado
+        return v.estado === 'borrador' || v.estado === 'en_revision' || v.estado === 'rechazado';
+      })
       .sort((a, b) => (a.version || 0) - (b.version || 0)); // Orden ascendente: V1, V2, V3...
   }, [versiones]);
 
   const versionesAprobadas = useMemo(() => {
     return [...versiones]
-      .filter(v => 
-        v.fase === 'META' && 
-        (v.estado === 'aprobado' || v.estado === 'vigente')
-      )
+      .filter(v => {
+        if (v.fase !== 'META') return false;
+        // Incluir versiones aprobadas o vigentes
+        if (v.estado === 'aprobado' || v.estado === 'vigente') return true;
+        // Incluir versiones en revisión para oficialización (mantener visible en tab aprobadas)
+        if (v.estado === 'en_revision' && v.estado_aprobacion?.tipo === 'OFICIALIZAR_META') return true;
+        return false;
+      })
       .sort((a, b) => (a.version || 0) - (b.version || 0)); // Orden ascendente: V1, V2, V3...
   }, [versiones]);
 
@@ -96,9 +107,33 @@ export default function PresupuestoGrupoCardMeta({
     return versiones.some(v => v.fase === 'META' && v.estado === 'en_revision');
   }, [versiones]);
 
+  // Obtener la versión más alta aprobada (no vigente, no en revisión para oficialización) para mostrar el botón de oficializar
+  const versionMasAltaAprobada = useMemo(() => {
+    const aprobadasNoVigentes = versionesAprobadas.filter(v => 
+      v.estado === 'aprobado' && 
+      !(v.estado === 'en_revision' && v.estado_aprobacion?.tipo === 'OFICIALIZAR_META')
+    );
+    if (aprobadasNoVigentes.length === 0) return null;
+    return aprobadasNoVigentes.sort((a, b) => (b.version || 0) - (a.version || 0))[0];
+  }, [versionesAprobadas]);
+
+  // Verificar si hay alguna versión vigente
+  const hayVersionVigente = useMemo(() => {
+    return versiones.some(v => v.fase === 'META' && v.estado === 'vigente');
+  }, [versiones]);
+
   // Función para obtener el badge de estado
-  const getEstadoBadge = (estado?: string) => {
+  const getEstadoBadge = (estado?: string, estadoAprobacion?: { tipo?: string | null; estado?: string | null }) => {
     if (!estado) return null;
+    
+    // Si está en revisión para oficialización, mostrar badge específico
+    if (estado === 'en_revision' && estadoAprobacion?.tipo === 'OFICIALIZAR_META') {
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-purple-500/10 text-purple-600 dark:text-purple-400 flex-shrink-0">
+          En Revisión (Oficialización)
+        </span>
+      );
+    }
     
     switch (estado) {
       case 'en_revision':
@@ -183,6 +218,31 @@ export default function PresupuestoGrupoCardMeta({
     } catch (error) {
       // El error ya se maneja en el hook con toast
       console.error('Error al enviar a aprobación:', error);
+    }
+  };
+
+  const handleOficializar = (version: Presupuesto) => {
+    setVersionParaOficializar(version);
+    setComentarioOficializar('');
+    setIsOficializarModalOpen(true);
+  };
+
+  const handleConfirmarOficializar = async () => {
+    if (!versionParaOficializar) return;
+    
+    try {
+      await enviarOficializacion.mutateAsync({
+        id_presupuesto_meta: versionParaOficializar.id_presupuesto,
+        comentario: comentarioOficializar.trim() || undefined,
+      });
+      setIsOficializarModalOpen(false);
+      setVersionParaOficializar(null);
+      setComentarioOficializar('');
+      // Refrescar la lista automáticamente
+      setIsExpanded(true);
+    } catch (error) {
+      // El error ya se maneja en el hook con toast
+      console.error('Error al enviar a oficialización:', error);
     }
   };
 
@@ -321,7 +381,7 @@ export default function PresupuestoGrupoCardMeta({
                     </span>
                     
                     {/* Badge de estado si existe */}
-                    {getEstadoBadge(version.estado)}
+                    {getEstadoBadge(version.estado, version.estado_aprobacion)}
                     
                     {/* Info con espacios fijos para alineación */}
                     <div className="flex items-center gap-4 text-xs text-[var(--text-secondary)] flex-1 min-w-0">
@@ -361,6 +421,21 @@ export default function PresupuestoGrupoCardMeta({
                         title={hayVersionEnRevision ? "Hay una versión en revisión. Debe aprobarse o rechazarse primero." : "Enviar a aprobación"}
                       >
                         <Send className="w-4 h-4" />
+                      </button>
+                    )}
+                    
+                    {/* Botón Oficializar - Solo para la versión más alta aprobada (no vigente) en tab aprobadas */}
+                    {tabActivo === 'aprobadas' && 
+                     versionMasAltaAprobada && 
+                     version.id_presupuesto === versionMasAltaAprobada.id_presupuesto && 
+                     !hayVersionVigente && (
+                      <button
+                        onClick={() => handleOficializar(version)}
+                        disabled={enviarOficializacion.isPending}
+                        className="p-1.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 dark:text-purple-400 shadow-sm hover:shadow transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Enviar a oficialización (poner en vigencia)"
+                      >
+                        <CheckCircle className="w-4 h-4" />
                       </button>
                     )}
                     
@@ -494,6 +569,73 @@ export default function PresupuestoGrupoCardMeta({
               disabled={enviarAprobacion.isPending}
             >
               {enviarAprobacion.isPending ? 'Enviando...' : 'Enviar a Aprobación'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal para enviar a oficialización */}
+      <Modal
+        isOpen={isOficializarModalOpen}
+        onClose={() => {
+          setIsOficializarModalOpen(false);
+          setVersionParaOficializar(null);
+          setComentarioOficializar('');
+        }}
+        title={`Oficializar Versión - V${versionParaOficializar?.version || ''}`}
+        size="md"
+      >
+        <div className="space-y-4">
+          <div>
+            <p className="text-sm text-[var(--text-secondary)]">
+              ¿Desea oficializar la versión <strong>V{versionParaOficializar?.version || ''}</strong> (poner en vigencia)?
+            </p>
+            {versionParaOficializar && (
+              <>
+                <p className="text-xs text-[var(--text-secondary)] mt-2">
+                  Monto: <strong>S/ {versionParaOficializar.total_presupuesto.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                </p>
+                {hayVersionVigente && (
+                  <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-2">
+                    ⚠️ Advertencia: Ya existe una versión vigente. Esta acción la reemplazará.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">
+              Comentario (opcional)
+            </label>
+            <Textarea
+              value={comentarioOficializar}
+              onChange={(e) => setComentarioOficializar(e.target.value)}
+              placeholder="Ingrese un comentario sobre esta solicitud de oficialización..."
+              rows={4}
+              className="w-full"
+            />
+          </div>
+
+          <div className="flex justify-end gap-3 pt-4 border-t border-[var(--border-color)]">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setIsOficializarModalOpen(false);
+                setVersionParaOficializar(null);
+                setComentarioOficializar('');
+              }}
+              disabled={enviarOficializacion.isPending}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="default"
+              onClick={handleConfirmarOficializar}
+              disabled={enviarOficializacion.isPending}
+              className="bg-purple-500 hover:bg-purple-600 text-white"
+            >
+              {enviarOficializacion.isPending ? 'Enviando...' : 'Enviar a Oficialización'}
             </Button>
           </div>
         </div>

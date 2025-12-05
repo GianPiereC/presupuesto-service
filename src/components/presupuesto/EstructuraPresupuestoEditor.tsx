@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/button';
 import { LoadingSpinner } from '@/components/ui';
 import Modal from '@/components/ui/modal';
 import CrearPartidasTitulosForm from './components/CrearPartidasTitulosForm';
-import DetallePartidaPanel from './components/DetallePartidaPanel';
+import DetallePartidaPanel, { type PartidaLocal } from './components/DetallePartidaPanel';
+import ModalAgregarSubPartida from './components/ModalAgregarSubPartida';
 import { useEstructuraPresupuesto } from '@/hooks/usePresupuestos';
 import { useCreateTitulo, useUpdateTitulo, useDeleteTitulo } from '@/hooks/useTitulos';
 import { useCreatePartida, useUpdatePartida, useDeletePartida } from '@/hooks/usePartidas';
@@ -38,11 +39,11 @@ interface Titulo {
 interface Partida {
   id_partida: string;
   id_presupuesto: string;
+  id_proyecto: string;
   id_titulo: string;
   id_partida_padre: string | null;
   nivel_partida: number;
   numero_item: string;
-  codigo_partida: string;
   descripcion: string;
   unidad_medida: string;
   metrado: number;
@@ -111,6 +112,12 @@ export default function EstructuraPresupuestoEditor({
   // Estado para items eliminados (se guardan cuando se presiona "Guardar cambios")
   const [titulosEliminados, setTitulosEliminados] = useState<Set<string>>(new Set());
   const [partidasEliminadas, setPartidasEliminadas] = useState<Set<string>>(new Set());
+
+  // Estado para subpartidas que necesitan creación de APU
+  const [subpartidasParaCrearApu, setSubpartidasParaCrearApu] = useState<Map<string, PartidaLocal>>(new Map());
+
+  // Estado para subpartidas pendientes de agregar al panel
+  const [subpartidasPendientes, setSubpartidasPendientes] = useState<PartidaLocal[]>([]);
   
   // Contador para generar IDs temporales únicos
   const contadorIdTemporal = useRef(0);
@@ -138,6 +145,12 @@ export default function EstructuraPresupuestoEditor({
   const [tituloEditando, setTituloEditando] = useState<Titulo | null>(null);
   const [partidaEditando, setPartidaEditando] = useState<Partida | null>(null);
   const [nombreItem, setNombreItem] = useState('');
+
+  // Estado para el modal de agregar sub partida
+  const [modalAgregarSubPartidaAbierto, setModalAgregarSubPartidaAbierto] = useState(false);
+  const [subPartidaParaAgregar, setSubPartidaParaAgregar] = useState<PartidaLocal | null>(null);
+  const [subPartidaParaEditar, setSubPartidaParaEditar] = useState<{ id: string; recursos: any[]; idPartidaOriginal?: string | null; rendimiento?: number; jornada?: number; descripcion?: string } | null>(null);
+  const [subPartidaParaActualizar, setSubPartidaParaActualizar] = useState<PartidaLocal | null>(null);
 
   // ============================================================================
   // FUNCIONES DE UTILIDAD PARA BLOQUES
@@ -1018,16 +1031,14 @@ export default function EstructuraPresupuestoEditor({
             numeroItemTemporal = `${tituloPadre.numero_item}.${numeroItemTemporal}`;
           }
 
-          const codigoPartidaTemporal = numeroItemTemporal;
-
           const nuevaPartida: Partida = {
             id_partida: generarIdTemporal(), // ID temporal
             id_presupuesto: id_presupuesto,
+            id_proyecto: id_proyecto_real,
             id_titulo: tempData.id_titulo,
             id_partida_padre: null,
             nivel_partida: tempData.nivel_partida,
             numero_item: numeroItemTemporal,
-            codigo_partida: codigoPartidaTemporal,
             descripcion: nombreGuardar.trim(),
             unidad_medida: partidaData?.unidad_medida || 'und',
             metrado: partidaData?.metrado || 0,
@@ -1815,52 +1826,69 @@ export default function EstructuraPresupuestoEditor({
       
       // 1. Preparar títulos nuevos
       const titulosNuevos = titulos.filter(t => t.id_titulo.startsWith('temp_'));
-      const titulosCrear = titulosNuevos.map(titulo => ({
-        id_presupuesto: titulo.id_presupuesto,
-        id_proyecto: id_proyecto_real!,
-        id_titulo_padre: titulo.id_titulo_padre || undefined,
-        nivel: titulo.nivel,
-        numero_item: titulo.numero_item,
-        descripcion: titulo.descripcion,
-        tipo: titulo.tipo,
-        orden: titulo.orden,
-        total_parcial: titulo.total_parcial,
-        temp_id: titulo.id_titulo, // ID temporal para mapeo
-      }));
+      const titulosCrear = titulosNuevos.map(titulo => {
+        // Calcular numero_item dinámicamente basado en la posición jerárquica actual
+        const numeroItemCalculado = calcularNumeroItem(titulo, 'TITULO');
+        return {
+          id_presupuesto: titulo.id_presupuesto,
+          id_proyecto: id_proyecto_real!,
+          id_titulo_padre: titulo.id_titulo_padre || undefined,
+          nivel: titulo.nivel,
+          numero_item: numeroItemCalculado,
+          descripcion: titulo.descripcion,
+          tipo: titulo.tipo,
+          orden: titulo.orden,
+          total_parcial: titulo.total_parcial,
+          temp_id: titulo.id_titulo, // ID temporal para mapeo
+        };
+      });
 
       // 2. Preparar partidas nuevas
       const partidasNuevas = partidas.filter(p => p.id_partida.startsWith('temp_'));
-      const partidasCrear = partidasNuevas.map(partida => ({
-        id_presupuesto: partida.id_presupuesto,
-        id_proyecto: id_proyecto_real!,
-        id_titulo: partida.id_titulo, // Puede ser temporal, el backend lo manejará
-        id_partida_padre: partida.id_partida_padre || undefined,
-        nivel_partida: partida.nivel_partida,
-        numero_item: partida.numero_item,
-        codigo_partida: partida.codigo_partida,
-        descripcion: partida.descripcion,
-        unidad_medida: partida.unidad_medida,
-        metrado: partida.metrado,
-        precio_unitario: partida.precio_unitario,
-        parcial_partida: partida.parcial_partida,
-        orden: partida.orden,
-        estado: partida.estado,
-        temp_id: partida.id_partida, // ID temporal para mapeo
-      }));
+      const partidasCrear = partidasNuevas.map(partida => {
+        // Calcular numero_item dinámicamente basado en la posición jerárquica actual
+        const numeroItemCalculado = calcularNumeroItem(partida, 'PARTIDA');
+        return {
+          id_presupuesto: partida.id_presupuesto,
+          id_proyecto: id_proyecto_real!,
+          id_titulo: partida.id_titulo, // Puede ser temporal, el backend lo manejará
+          id_partida_padre: partida.id_partida_padre || undefined,
+          nivel_partida: partida.nivel_partida,
+          numero_item: numeroItemCalculado,
+          descripcion: partida.descripcion,
+          unidad_medida: partida.unidad_medida,
+          metrado: partida.metrado,
+          precio_unitario: partida.precio_unitario,
+          parcial_partida: partida.parcial_partida,
+          orden: partida.orden,
+          estado: partida.estado,
+          temp_id: partida.id_partida, // ID temporal para mapeo
+        };
+      });
 
       // 3. Preparar títulos a actualizar
+      // Si hay elementos eliminados, todos los elementos restantes deben actualizar su numero_item
+      const hayEliminaciones = titulosEliminados.size > 0 || partidasEliminadas.size > 0;
+      
       const titulosActualizar = titulos
         .filter(t => !t.id_titulo.startsWith('temp_'))
         .map(titulo => {
           const original = titulosOriginales.find(t => t.id_titulo === titulo.id_titulo);
           if (!original) return null;
           
+          // Calcular numero_item dinámicamente basado en la posición jerárquica actual
+          const numeroItemCalculado = calcularNumeroItem(titulo, 'TITULO');
+          
           const cambios: any = { id_titulo: titulo.id_titulo };
           if (titulo.descripcion !== original.descripcion) cambios.descripcion = titulo.descripcion;
           if (titulo.id_titulo_padre !== original.id_titulo_padre) cambios.id_titulo_padre = titulo.id_titulo_padre;
           if (titulo.orden !== original.orden) cambios.orden = titulo.orden;
           if (titulo.nivel !== original.nivel) cambios.nivel = titulo.nivel;
-          if (titulo.numero_item !== original.numero_item) cambios.numero_item = titulo.numero_item;
+          // Siempre actualizar numero_item con el valor calculado dinámicamente
+          // Si hay eliminaciones, forzar actualización incluso si el numero_item no cambió visualmente
+          if (numeroItemCalculado !== original.numero_item || hayEliminaciones) {
+            cambios.numero_item = numeroItemCalculado;
+          }
           if (titulo.tipo !== original.tipo) cambios.tipo = titulo.tipo;
           if (titulo.total_parcial !== original.total_parcial) cambios.total_parcial = titulo.total_parcial;
           
@@ -1875,6 +1903,9 @@ export default function EstructuraPresupuestoEditor({
           const original = partidasOriginales.find(p => p.id_partida === partida.id_partida);
           if (!original) return null;
           
+          // Calcular numero_item dinámicamente basado en la posición jerárquica actual
+          const numeroItemCalculado = calcularNumeroItem(partida, 'PARTIDA');
+          
           const cambios: any = { id_partida: partida.id_partida };
           if (partida.descripcion !== original.descripcion) cambios.descripcion = partida.descripcion;
           if (partida.id_titulo !== original.id_titulo) cambios.id_titulo = partida.id_titulo;
@@ -1884,8 +1915,11 @@ export default function EstructuraPresupuestoEditor({
           if (partida.precio_unitario !== original.precio_unitario) cambios.precio_unitario = partida.precio_unitario;
           if (partida.unidad_medida !== original.unidad_medida) cambios.unidad_medida = partida.unidad_medida;
           if (partida.nivel_partida !== original.nivel_partida) cambios.nivel_partida = partida.nivel_partida;
-          if (partida.numero_item !== original.numero_item) cambios.numero_item = partida.numero_item;
-          if (partida.codigo_partida !== original.codigo_partida) cambios.codigo_partida = partida.codigo_partida;
+          // Siempre actualizar numero_item con el valor calculado dinámicamente
+          // Si hay eliminaciones, forzar actualización incluso si el numero_item no cambió visualmente
+          if (numeroItemCalculado !== original.numero_item || hayEliminaciones) {
+            cambios.numero_item = numeroItemCalculado;
+          }
           if (partida.estado !== original.estado) cambios.estado = partida.estado;
           if (partida.parcial_partida !== original.parcial_partida) cambios.parcial_partida = partida.parcial_partida;
           
@@ -1924,15 +1958,69 @@ export default function EstructuraPresupuestoEditor({
         throw new Error(response.batchEstructuraPresupuesto.message || 'Error al guardar los cambios');
       }
 
+      // Crear APUs para subpartidas nuevas que fueron creadas
+      if (subpartidasParaCrearApu.size > 0) {
+        // Importar las funciones necesarias para crear APUs
+        const { useCreateApu } = await import('@/hooks/useAPU');
+        const createApu = useCreateApu();
+
+        // Crear un mapa de temp_id -> real_id para las subpartidas
+        const tempIdToRealId = new Map<string, string>();
+        response.batchEstructuraPresupuesto.partidasCreadas.forEach(p => {
+          if (p.temp_id && p.temp_id.startsWith('temp_')) {
+            tempIdToRealId.set(p.temp_id, p.id_partida);
+          }
+        });
+
+        for (const [tempId, subpartida] of subpartidasParaCrearApu) {
+          const realId = tempIdToRealId.get(tempId);
+          if (!realId || !subpartida.recursos || subpartida.recursos.length === 0) continue;
+
+          const recursosInput: any[] = subpartida.recursos.map((r, index) => ({
+            recurso_id: r.recurso_id,
+            codigo_recurso: r.codigo_recurso,
+            descripcion: r.descripcion,
+            unidad_medida: r.unidad_medida,
+            tipo_recurso: r.tipo_recurso,
+            tipo_recurso_codigo: r.tipo_recurso,
+            id_precio_recurso: r.id_precio_recurso,
+            precio_usuario: r.precio,
+            cuadrilla: r.cuadrilla,
+            cantidad: r.cantidad,
+            desperdicio_porcentaje: r.desperdicio_porcentaje || 0,
+            cantidad_con_desperdicio: r.cantidad * (1 + (r.desperdicio_porcentaje || 0) / 100),
+            parcial: r.parcial,
+            orden: index,
+          }));
+
+          try {
+            await createApu.mutateAsync({
+              id_partida: realId,
+              id_presupuesto: id_proyecto_real!,
+              id_proyecto: id_proyecto_real!,
+              rendimiento: subpartida.rendimiento || 1.0,
+              jornada: subpartida.jornada || 8,
+              recursos: recursosInput,
+            });
+          } catch (error) {
+            console.error(`Error creando APU para subpartida ${realId}:`, error);
+            // No fallar toda la operación por un error en APU
+          }
+        }
+
+        // Limpiar el estado de subpartidas para crear APU
+        setSubpartidasParaCrearApu(new Map());
+      }
+
       // Invalidar queries para recargar datos
       await queryClient.invalidateQueries({ queryKey: ['estructura-presupuesto', id_presupuesto] });
-      
+
       // Limpiar estados de eliminados
       setTitulosEliminados(new Set());
       setPartidasEliminadas(new Set());
 
       toast.success(response.batchEstructuraPresupuesto.message || 'Cambios guardados exitosamente');
-      
+
       // Los datos se recargarán automáticamente gracias a la invalidación de queries
     } catch (error: any) {
       console.error('Error al guardar cambios:', error);
@@ -1949,6 +2037,7 @@ export default function EstructuraPresupuestoEditor({
     id_proyecto_real,
     id_presupuesto,
     queryClient,
+    calcularNumeroItem,
   ]);
 
   /**
@@ -2442,8 +2531,39 @@ export default function EstructuraPresupuestoEditor({
             id_proyecto={id_proyecto_real}
             partida={partidaSeleccionada ? partidas.find(p => p.id_partida === partidaSeleccionada) || null : null}
             onAgregarSubPartida={() => {
-              // TODO: Implementar cuando se agregue la funcionalidad
-              console.log('Agregar sub partida');
+              setSubPartidaParaEditar(null);
+              setModalAgregarSubPartidaAbierto(true);
+            }}
+            onEditarSubPartida={(idPartidaSubpartida, recursos, idPartidaOriginal, rendimiento, jornada, descripcion) => {
+              // Guardar TODOS los datos de la subpartida para cargarlos en el modal
+              setSubPartidaParaEditar({
+                id: idPartidaSubpartida,
+                recursos,
+                idPartidaOriginal,
+                rendimiento,
+                jornada,
+                descripcion
+              });
+              setModalAgregarSubPartidaAbierto(true);
+            }}
+            subpartidasPendientes={subpartidasPendientes}
+            onLimpiarSubpartidasPendientes={() => {
+              setSubpartidasPendientes([]);
+            }}
+            subPartidaParaActualizar={subPartidaParaActualizar}
+            onLimpiarSubPartidaParaActualizar={() => {
+              setSubPartidaParaActualizar(null);
+            }}
+            onEliminarSubPartida={(idPartidaSubpartida) => {
+              // Eliminar la subpartida del estado de partidas
+              setPartidas(prev => prev.filter(p => p.id_partida !== idPartidaSubpartida));
+
+              // También eliminarla de las subpartidas para crear APU si existe
+              setSubpartidasParaCrearApu(prev => {
+                const newMap = new Map(prev);
+                newMap.delete(idPartidaSubpartida);
+                return newMap;
+              });
             }}
             modo={modo as 'edicion' | 'lectura' | 'meta' | 'licitacion' | 'contractual'}
           />
@@ -2476,6 +2596,79 @@ export default function EstructuraPresupuestoEditor({
           } : undefined}
         />
       </Modal>
+
+      {/* Modal para agregar subpartida */}
+      <ModalAgregarSubPartida
+        isOpen={modalAgregarSubPartidaAbierto}
+        onClose={() => {
+          setModalAgregarSubPartidaAbierto(false);
+          setSubPartidaParaEditar(null);
+        }}
+        partidas={partidas}
+        id_presupuesto={id_presupuesto}
+        id_proyecto={id_proyecto_real}
+        id_partida_padre={itemSeleccionado}
+        onAgregarSubPartida={(subPartida) => {
+          // Agregar la subpartida como una nueva partida al estado
+          setPartidas(prev => {
+            const nuevasPartidas = [...prev, {
+              ...subPartida,
+              // Asegurar que tenga todos los campos necesarios de Partida
+              id_presupuesto: subPartida.id_presupuesto,
+              id_proyecto: subPartida.id_proyecto,
+              id_titulo: subPartida.id_titulo,
+              id_partida_padre: subPartida.id_partida_padre,
+              nivel_partida: subPartida.nivel_partida,
+              numero_item: subPartida.numero_item,
+              descripcion: subPartida.descripcion,
+              unidad_medida: subPartida.unidad_medida,
+              metrado: subPartida.metrado,
+              precio_unitario: subPartida.precio_unitario,
+              parcial_partida: subPartida.parcial_partida,
+              orden: subPartida.orden,
+              estado: subPartida.estado,
+            }];
+
+            // NO actualizar el precio_unitario aquí - el backend lo calculará basándose en el APU
+            return nuevasPartidas;
+          });
+
+          // Guardar la subpartida para crear su APU después
+          setSubpartidasParaCrearApu(prev => new Map(prev).set(subPartida.id_partida, subPartida));
+
+          // Agregar la subpartida a la lista de pendientes para que el panel la procese
+          setSubpartidasPendientes(prev => [...prev, subPartida]);
+
+          setModalAgregarSubPartidaAbierto(false);
+          setSubPartidaParaEditar(null);
+        }}
+        subPartidaParaEditar={subPartidaParaEditar}
+        onActualizarSubPartida={(idSubPartida, subPartida) => {
+          // Calcular el precio_unitario basado en los parciales de los recursos
+          const costoDirectoSubpartida = (subPartida.recursos || []).reduce((suma, recurso) => suma + (recurso.parcial || 0), 0);
+          const nuevoPrecioUnitario = Math.round(costoDirectoSubpartida * 100) / 100;
+
+          // Actualizar la subpartida existente en el estado del padre
+          setPartidas(prev => prev.map(p =>
+            p.id_partida === idSubPartida
+              ? {
+                  ...p,
+                  descripcion: subPartida.descripcion,
+                  unidad_medida: subPartida.unidad_medida,
+                  precio_unitario: nuevoPrecioUnitario, // Usar el recalculado
+                  parcial_partida: subPartida.parcial_partida,
+                }
+              : p
+          ));
+
+          // Establecer la subpartida para actualizar en el panel de detalle
+          setSubPartidaParaActualizar(subPartida);
+
+          setModalAgregarSubPartidaAbierto(false);
+          setSubPartidaParaEditar(null);
+        }}
+        modo={modo as 'edicion' | 'lectura' | 'meta' | 'licitacion' | 'contractual'}
+      />
     </div>
   );
 }

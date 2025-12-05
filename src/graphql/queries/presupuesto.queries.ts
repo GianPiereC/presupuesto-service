@@ -220,7 +220,6 @@ export const GET_ESTRUCTURA_PRESUPUESTO_QUERY = `
         id_partida_padre
         nivel_partida
         numero_item
-        codigo_partida
         descripcion
         unidad_medida
         metrado

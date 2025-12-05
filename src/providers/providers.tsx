@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { AuthProvider } from '@/context/auth-context';
 import { ThemeProvider } from '@/context/theme-context';
 import { ConfirmProvider } from '@/context/confirm-context';
+import { PrecioSyncProvider } from '@/context/precio-sync-context';
 import { QUERY_CONFIG } from '@/lib/constants';
 
 export function Providers({ children }: { children: React.ReactNode }) {
@@ -23,7 +24,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <ThemeProvider>
         <AuthProvider>
           <ConfirmProvider>
-            {children}
+            <PrecioSyncProvider>
+              {children}
+            </PrecioSyncProvider>
             <Toaster
               position="top-right"
               toastOptions={{

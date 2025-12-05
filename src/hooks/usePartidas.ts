@@ -14,7 +14,6 @@ export interface Partida {
   id_partida_padre: string | null;
   nivel_partida: number;
   numero_item: string;
-  codigo_partida: string;
   descripcion: string;
   unidad_medida: string;
   metrado: number;
@@ -31,7 +30,6 @@ export interface PartidaInput {
   id_partida_padre?: string | null;
   nivel_partida: number;
   numero_item: string;
-  codigo_partida: string;
   descripcion: string;
   unidad_medida: string;
   metrado: number;
@@ -47,7 +45,6 @@ export interface PartidaUpdateInput {
   id_partida_padre?: string | null;
   nivel_partida?: number;
   numero_item?: string;
-  codigo_partida?: string;
   descripcion?: string;
   unidad_medida?: string;
   metrado?: number;

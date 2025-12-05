@@ -47,8 +47,23 @@ export default function PresupuestoCard({ presupuestos, grupo, id_proyecto }: Pr
     
     versiones.forEach(v => {
       const fase = (v.fase || 'BORRADOR') as FasePresupuesto;
-      if (agrupadas[fase]) {
-        agrupadas[fase].push(v);
+      
+      // Para fase META, aplicar el mismo filtro que en PresupuestoGrupoCardMeta (tab aprobadas)
+      if (fase === 'META') {
+        // Incluir versiones aprobadas o vigentes
+        if (v.estado === 'aprobado' || v.estado === 'vigente') {
+          agrupadas[fase].push(v);
+        }
+        // Incluir versiones en revisión para oficialización (mantener visible como en tab aprobadas)
+        else if (v.estado === 'en_revision' && v.estado_aprobacion?.tipo === 'OFICIALIZAR_META') {
+          agrupadas[fase].push(v);
+        }
+        // No incluir otros estados (borrador, rechazado, en_revision sin OFICIALIZAR_META, null)
+      } else {
+        // Para otras fases, incluir todas las versiones
+        if (agrupadas[fase]) {
+          agrupadas[fase].push(v);
+        }
       }
     });
     
@@ -375,6 +390,22 @@ export default function PresupuestoCard({ presupuestos, grupo, id_proyecto }: Pr
                                 {esVersionCerrada(presupuesto) && (
                                   <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-500/10 text-gray-600 dark:text-gray-400 whitespace-nowrap">
                                     Cerrado
+                                  </span>
+                                )}
+                                {/* Badges para META */}
+                                {presupuesto.fase === 'META' && presupuesto.estado === 'vigente' && (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 whitespace-nowrap">
+                                    Vigente
+                                  </span>
+                                )}
+                                {presupuesto.fase === 'META' && presupuesto.estado === 'aprobado' && (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-green-500/10 text-green-600 dark:text-green-400 whitespace-nowrap">
+                                    Aprobado
+                                  </span>
+                                )}
+                                {presupuesto.fase === 'META' && presupuesto.estado === 'en_revision' && presupuesto.estado_aprobacion?.tipo === 'OFICIALIZAR_META' && (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-purple-500/10 text-purple-600 dark:text-purple-400 whitespace-nowrap">
+                                    En Revisión (Oficialización)
                                   </span>
                                 )}
                                 
