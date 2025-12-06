@@ -2333,11 +2333,16 @@ export default function DetallePartidaPanel({
                       </td>
                       <td className="px-1 py-1 text-right">
                         {(() => {
-                          // Para subpartidas, mostrar precio_unitario_subpartida (no editable)
-                          if (recurso.esSubpartida && recurso.precio_unitario_subpartida !== undefined) {
+                          const esEquipoPorcentajeMo = recurso.tipo_recurso === 'EQUIPO' && (recurso.unidad_medida === '%mo' || recurso.unidad_medida?.toLowerCase() === '%mo');
+                          
+                          // Para subpartidas o %mo, mostrar precio como texto de solo lectura
+                          if ((recurso.esSubpartida && recurso.precio_unitario_subpartida !== undefined) || esEquipoPorcentajeMo) {
                             return (
                               <span className="text-[10px] text-[var(--text-primary)]">
-                                S/ {recurso.precio_unitario_subpartida.toFixed(2)}
+                                {recurso.esSubpartida
+                                  ? `S/ ${recurso.precio_unitario_subpartida !== undefined && recurso.precio_unitario_subpartida !== null ? recurso.precio_unitario_subpartida.toFixed(2) : '—'}`
+                                  : `S/ ${recurso.precio !== undefined && recurso.precio !== null ? recurso.precio.toFixed(2) : '—'}`
+                                }
                               </span>
                             );
                           }
@@ -2443,7 +2448,7 @@ export default function DetallePartidaPanel({
                                   : `S/ ${recurso.precio !== undefined && recurso.precio !== null ? recurso.precio.toFixed(2) : '—'}`
                                 }
                               </span>
-                              {!recurso.esSubpartida && recurso.tiene_precio_override && (
+                              {!recurso.esSubpartida && !esEquipoPorcentajeMo && recurso.tiene_precio_override && (
                                 <span className="text-[8px] text-[var(--text-secondary)] italic" title="Precio único">
                                   (Único)
                                 </span>

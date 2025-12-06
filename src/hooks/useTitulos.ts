@@ -18,6 +18,7 @@ export interface Titulo {
   tipo: TipoTitulo;
   orden: number;
   total_parcial: number;
+  id_especialidad?: string | null;
 }
 
 export interface TituloInput {
@@ -30,6 +31,7 @@ export interface TituloInput {
   tipo: TipoTitulo;
   orden: number;
   total_parcial?: number;
+  id_especialidad?: string | null;
 }
 
 export interface TituloUpdateInput {
@@ -41,6 +43,7 @@ export interface TituloUpdateInput {
   tipo?: TipoTitulo;
   orden?: number;
   total_parcial?: number;
+  id_especialidad?: string | null;
 }
 
 /**

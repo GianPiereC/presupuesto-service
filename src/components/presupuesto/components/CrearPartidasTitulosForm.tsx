@@ -1,18 +1,21 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { SearchSelect } from '@/components/ui/search-select';
+import { useEspecialidades } from '@/hooks/useEspecialidades';
 
 interface CrearPartidasTitulosFormProps {
   nombre: string;
   onNombreChange: (nombre: string) => void;
-  onSave: (nombre: string, partidaData?: PartidaData) => void;
+  onSave: (nombre: string, partidaData?: PartidaData, id_especialidad?: string | null) => void;
   onCancel: () => void;
   isLoading?: boolean;
   isEdit?: boolean;
   tipo?: 'TITULO' | 'PARTIDA';
   partidaData?: PartidaData;
+  id_especialidad?: string | null; // Para edición
 }
 
 interface PartidaData {
@@ -31,8 +34,22 @@ export default function CrearPartidasTitulosForm({
   isEdit = false,
   tipo = 'TITULO',
   partidaData,
+  id_especialidad: id_especialidadProp,
 }: CrearPartidasTitulosFormProps) {
   const [localNombre, setLocalNombre] = useState(nombre);
+  const [localIdEspecialidad, setLocalIdEspecialidad] = useState<string | null>(id_especialidadProp || null);
+  const { data: especialidades, isLoading: isLoadingEspecialidades } = useEspecialidades();
+  
+  // Optimizar las opciones de especialidad con useMemo
+  const especialidadOptions = useMemo(() => {
+    if (!especialidades) return [];
+    return especialidades.map((esp) => ({
+      value: esp.id_especialidad,
+      label: esp.nombre,
+      description: esp.descripcion,
+    }));
+  }, [especialidades]);
+  
   const [localPartidaData, setLocalPartidaData] = useState<PartidaData>({
     unidad_medida: partidaData?.unidad_medida || 'und',
     metrado: partidaData?.metrado || 0,
@@ -43,6 +60,12 @@ export default function CrearPartidasTitulosForm({
   useEffect(() => {
     setLocalNombre(nombre);
   }, [nombre]);
+
+  useEffect(() => {
+    if (id_especialidadProp !== undefined) {
+      setLocalIdEspecialidad(id_especialidadProp);
+    }
+  }, [id_especialidadProp]);
 
   useEffect(() => {
     if (partidaData) {
@@ -89,7 +112,8 @@ export default function CrearPartidasTitulosForm({
         };
         onSave(localNombre.trim(), partidaDataToSave);
       } else {
-        onSave(localNombre.trim());
+        // Para TITULO, pasar también id_especialidad
+        onSave(localNombre.trim(), undefined, localIdEspecialidad || null);
       }
     }
   };
@@ -110,6 +134,25 @@ export default function CrearPartidasTitulosForm({
           className="text-sm"
         />
       </div>
+
+      {tipo === 'TITULO' && (
+        <div>
+          <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">
+            Especialidad (Opcional)
+          </label>
+          <SearchSelect
+            value={localIdEspecialidad}
+            onChange={(value) => {
+              setLocalIdEspecialidad(value);
+            }}
+            options={especialidadOptions}
+            placeholder="Buscar especialidad..."
+            disabled={isLoadingEspecialidades}
+            isLoading={isLoadingEspecialidades}
+            emptyMessage="No se encontraron especialidades"
+          />
+        </div>
+      )}
 
       {tipo === 'PARTIDA' && (
         <>

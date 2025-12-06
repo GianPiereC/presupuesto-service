@@ -7,12 +7,16 @@ export interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElemen
 
 const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
   ({ className = '', ...props }, ref) => {
-    const baseClasses = 'w-full bg-transparent border border-gray-200 text-[var(--text-primary)] rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 px-2 py-2 text-xs';
+    const baseClasses = 'w-full bg-[var(--card-bg)] border border-[var(--border-color)] text-[var(--text-primary)] rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 px-2 py-2 text-xs';
     
     return (
       <select
         ref={ref}
         className={cn(baseClasses, className)}
+        style={{
+          backgroundColor: 'var(--card-bg)',
+          color: 'var(--text-primary)',
+        }}
         {...props}
       />
     );

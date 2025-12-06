@@ -34,6 +34,7 @@ interface Titulo {
   tipo: 'TITULO' | 'SUBTITULO';
   orden: number;
   total_parcial: number;
+  id_especialidad?: string | null;
 }
 
 interface Partida {
@@ -949,7 +950,7 @@ export default function EstructuraPresupuestoEditor({
   /**
    * Guarda el item (título o partida) - solo en estado local, NO en la base de datos
    */
-  const handleGuardarItem = useCallback((nombreGuardar: string, partidaData?: { unidad_medida: string; metrado: number; precio_unitario: number; parcial_partida: number }) => {
+  const handleGuardarItem = useCallback((nombreGuardar: string, partidaData?: { unidad_medida: string; metrado: number; precio_unitario: number; parcial_partida: number }, id_especialidad?: string | null) => {
     // Validar que el nombre no esté vacío
     if (!nombreGuardar || !nombreGuardar.trim()) {
       // Si está editando y el nombre está vacío, no hacer nada y mantener el modal abierto
@@ -965,7 +966,7 @@ export default function EstructuraPresupuestoEditor({
         // Actualizar título existente solo en estado local
         setTitulos(prev => prev.map(t => 
           t.id_titulo === tituloEditando.id_titulo
-            ? { ...t, descripcion: nombreGuardar.trim() }
+            ? { ...t, descripcion: nombreGuardar.trim(), id_especialidad: id_especialidad !== undefined ? id_especialidad : t.id_especialidad }
             : t
         ));
       } else {
@@ -996,6 +997,7 @@ export default function EstructuraPresupuestoEditor({
             tipo: nivelCalculado === 1 ? 'TITULO' : 'SUBTITULO',
             orden: tempData.orden,
             total_parcial: 0,
+            id_especialidad: id_especialidad || null,
           };
 
           setTitulos(prev => [...prev, nuevoTitulo]);
@@ -1780,7 +1782,8 @@ export default function EstructuraPresupuestoEditor({
         titulo.descripcion !== original.descripcion ||
         titulo.id_titulo_padre !== original.id_titulo_padre ||
         titulo.orden !== original.orden ||
-        titulo.nivel !== original.nivel
+        titulo.nivel !== original.nivel ||
+        titulo.id_especialidad !== original.id_especialidad
       )) {
         return true;
       }
@@ -1839,6 +1842,7 @@ export default function EstructuraPresupuestoEditor({
           tipo: titulo.tipo,
           orden: titulo.orden,
           total_parcial: titulo.total_parcial,
+          id_especialidad: titulo.id_especialidad || undefined,
           temp_id: titulo.id_titulo, // ID temporal para mapeo
         };
       });
@@ -1891,6 +1895,17 @@ export default function EstructuraPresupuestoEditor({
           }
           if (titulo.tipo !== original.tipo) cambios.tipo = titulo.tipo;
           if (titulo.total_parcial !== original.total_parcial) cambios.total_parcial = titulo.total_parcial;
+          
+          // Verificar si hay cambios además del id_titulo
+          const tieneCambios = Object.keys(cambios).length > 0;
+          
+          // Incluir id_especialidad si cambió o si hay otros cambios (para asegurar que se guarde correctamente en cambios globales)
+          if (titulo.id_especialidad !== original.id_especialidad) {
+            cambios.id_especialidad = titulo.id_especialidad || null;
+          } else if (tieneCambios && titulo.id_especialidad !== undefined) {
+            // Si hay otros cambios, incluir id_especialidad también para asegurar que se guarde correctamente
+            cambios.id_especialidad = titulo.id_especialidad || null;
+          }
           
           return Object.keys(cambios).length > 1 ? cambios : null; // Solo si hay cambios además del id
         })
@@ -2594,6 +2609,7 @@ export default function EstructuraPresupuestoEditor({
             precio_unitario: partidaEditando.precio_unitario,
             parcial_partida: partidaEditando.parcial_partida,
           } : undefined}
+          id_especialidad={tituloEditando?.id_especialidad}
         />
       </Modal>
 

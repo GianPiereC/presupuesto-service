@@ -67,4 +67,9 @@ export {
   type RecursoApuInput,
   type TipoRecursoApu,
 } from './useAPU';
+export {
+  useEspecialidades,
+  useEspecialidad,
+  type Especialidad,
+} from './useEspecialidades';
 

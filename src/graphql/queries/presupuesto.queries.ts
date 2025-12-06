@@ -210,6 +210,7 @@ export const GET_ESTRUCTURA_PRESUPUESTO_QUERY = `
         tipo
         orden
         total_parcial
+        id_especialidad
       }
       partidas {
         _id

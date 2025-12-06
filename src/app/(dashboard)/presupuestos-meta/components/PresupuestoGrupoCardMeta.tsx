@@ -111,7 +111,7 @@ export default function PresupuestoGrupoCardMeta({
   const versionMasAltaAprobada = useMemo(() => {
     const aprobadasNoVigentes = versionesAprobadas.filter(v => 
       v.estado === 'aprobado' && 
-      !(v.estado === 'en_revision' && v.estado_aprobacion?.tipo === 'OFICIALIZAR_META')
+      !(v.estado_aprobacion?.tipo === 'OFICIALIZAR_META' && v.estado_aprobacion?.estado === 'PENDIENTE')
     );
     if (aprobadasNoVigentes.length === 0) return null;
     return aprobadasNoVigentes.sort((a, b) => (b.version || 0) - (a.version || 0))[0];

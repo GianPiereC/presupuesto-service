@@ -13,6 +13,7 @@ export const CREATE_TITULO_MUTATION = `
     $tipo: TipoTitulo!
     $orden: Int!
     $total_parcial: Float
+    $id_especialidad: String
   ) {
     createTitulo(
       id_presupuesto: $id_presupuesto
@@ -24,6 +25,7 @@ export const CREATE_TITULO_MUTATION = `
       tipo: $tipo
       orden: $orden
       total_parcial: $total_parcial
+      id_especialidad: $id_especialidad
     ) {
       _id
       id_titulo
@@ -36,6 +38,7 @@ export const CREATE_TITULO_MUTATION = `
       tipo
       orden
       total_parcial
+      id_especialidad
     }
   }
 `;
@@ -50,6 +53,7 @@ export const UPDATE_TITULO_MUTATION = `
     $tipo: TipoTitulo
     $orden: Int
     $total_parcial: Float
+    $id_especialidad: String
   ) {
     updateTitulo(
       id_titulo: $id_titulo
@@ -60,6 +64,7 @@ export const UPDATE_TITULO_MUTATION = `
       tipo: $tipo
       orden: $orden
       total_parcial: $total_parcial
+      id_especialidad: $id_especialidad
     ) {
       _id
       id_titulo
@@ -72,6 +77,7 @@ export const UPDATE_TITULO_MUTATION = `
       tipo
       orden
       total_parcial
+      id_especialidad
     }
   }
 `;
