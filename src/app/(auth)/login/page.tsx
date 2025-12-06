@@ -31,7 +31,7 @@ function LoginForm() {
     try {
       await login(usuario, contrasenna);
       toast.success('Inicio de sesión exitoso');
-      
+
       // Redirigir a la ruta original o al dashboard
       const redirect = searchParams.get('redirect') || '/';
       router.push(redirect);
@@ -43,16 +43,16 @@ function LoginForm() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
-      <div className="w-full max-w-md space-y-8 rounded-lg bg-white p-8 shadow-md">
+    <div className="flex min-h-screen items-center justify-center bg-[var(--content-bg)] px-4 transition-colors duration-300">
+      <div className="w-full max-w-md space-y-8 rounded-lg bg-[var(--card-bg)] p-8 card-shadow transition-colors duration-300">
         <div className="text-center">
-          <h2 className="text-3xl font-bold text-gray-900">Kapo Presupuestos</h2>
-          <p className="mt-2 text-sm text-gray-600">Inicia sesión en tu cuenta</p>
+          <h2 className="text-3xl font-bold text-[var(--text-on-content-bg-heading)]">Kapo Presupuestos</h2>
+          <p className="mt-2 text-sm text-[var(--text-secondary)]">Inicia sesión en tu cuenta</p>
         </div>
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="space-y-4">
             <div>
-              <label htmlFor="usuario" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="usuario" className="block text-sm font-medium text-[var(--text-on-content-bg)]">
                 Usuario
               </label>
               <Input
@@ -66,7 +66,7 @@ function LoginForm() {
               />
             </div>
             <div>
-              <label htmlFor="contrasenna" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="contrasenna" className="block text-sm font-medium text-[var(--text-on-content-bg)]">
                 Contraseña
               </label>
               <Input
@@ -92,10 +92,10 @@ function LoginForm() {
 export default function LoginPage() {
   return (
     <Suspense fallback={
-      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
-        <div className="w-full max-w-md space-y-8 rounded-lg bg-white p-8 shadow-md">
+      <div className="flex min-h-screen items-center justify-center bg-[var(--content-bg)] px-4 transition-colors duration-300">
+        <div className="w-full max-w-md space-y-8 rounded-lg bg-[var(--card-bg)] p-8 card-shadow transition-colors duration-300">
           <div className="text-center">
-            <h2 className="text-3xl font-bold text-gray-900 mb-4">Kapo Presupuestos</h2>
+            <h2 className="text-3xl font-bold text-[var(--text-on-content-bg-heading)] mb-4">Kapo Presupuestos</h2>
             <LoadingSpinner size={80} showText={true} text="Cargando..." />
           </div>
         </div>

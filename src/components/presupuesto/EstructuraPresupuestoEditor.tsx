@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, ChevronDown, ChevronRight, ChevronLeft, ArrowUp, ArrowDown, Scissors, Clipboard, ArrowLeft, Trash2, Save } from 'lucide-react';
+import { Plus, ChevronDown, ChevronRight, ChevronLeft, ArrowUp, ArrowDown, Scissors, Clipboard, ArrowLeft, Trash2, Save, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { LoadingSpinner } from '@/components/ui';
 import Modal from '@/components/ui/modal';
@@ -79,7 +79,7 @@ export default function EstructuraPresupuestoEditor({
   const [partidasColapsadas, setPartidasColapsadas] = useState<Set<string>>(new Set());
   const [itemSeleccionado, setItemSeleccionado] = useState<string | null>(null);
   const [itemCortado, setItemCortado] = useState<string | null>(null);
-  
+
   // Estado para el panel redimensionable (porcentaje del panel inferior, inicialmente 25%)
   const [panelInferiorHeight, setPanelInferiorHeight] = useState(25);
   const [isResizing, setIsResizing] = useState(false);
@@ -95,31 +95,32 @@ export default function EstructuraPresupuestoEditor({
   const createPartida = useCreatePartida();
   const updatePartida = useUpdatePartida();
   const deletePartida = useDeletePartida();
-  
+
   // Hook para confirmaciones
   const { confirm } = useConfirm();
-  
+
   // Query client para invalidar queries manualmente
   const queryClient = useQueryClient();
 
   // Estado local para manejar los datos (se actualiza cuando llegan los datos del backend)
   const [titulos, setTitulos] = useState<Titulo[]>([]);
   const [partidas, setPartidas] = useState<Partida[]>([]);
-  
+
   // Estado para datos originales (para comparar cambios)
   const [titulosOriginales, setTitulosOriginales] = useState<Titulo[]>([]);
   const [partidasOriginales, setPartidasOriginales] = useState<Partida[]>([]);
-  
+
   // Estado para items eliminados (se guardan cuando se presiona "Guardar cambios")
   const [titulosEliminados, setTitulosEliminados] = useState<Set<string>>(new Set());
   const [partidasEliminadas, setPartidasEliminadas] = useState<Set<string>>(new Set());
+  const [isSaving, setIsSaving] = useState(false);
 
   // Estado para subpartidas que necesitan creación de APU
   const [subpartidasParaCrearApu, setSubpartidasParaCrearApu] = useState<Map<string, PartidaLocal>>(new Map());
 
   // Estado para subpartidas pendientes de agregar al panel
   const [subpartidasPendientes, setSubpartidasPendientes] = useState<PartidaLocal[]>([]);
-  
+
   // Contador para generar IDs temporales únicos
   const contadorIdTemporal = useRef(0);
 
@@ -162,19 +163,19 @@ export default function EstructuraPresupuestoEditor({
    */
   const obtenerIdsBloqueTitulo = useCallback((id_titulo: string): string[] => {
     const ids: string[] = [id_titulo];
-    
+
     // Agregar títulos hijos recursivamente
     const hijosTitulos = titulos.filter(t => t.id_titulo_padre === id_titulo);
     hijosTitulos.forEach(hijo => {
       ids.push(...obtenerIdsBloqueTitulo(hijo.id_titulo));
     });
-    
+
     // Agregar partidas directas del título
     const partidasDirectas = partidas.filter(p => p.id_titulo === id_titulo && p.id_partida_padre === null);
     partidasDirectas.forEach(partida => {
       ids.push(...obtenerIdsBloquePartida(partida.id_partida));
     });
-    
+
     return ids;
   }, [titulos, partidas]);
 
@@ -183,13 +184,13 @@ export default function EstructuraPresupuestoEditor({
    */
   const obtenerIdsBloquePartida = useCallback((id_partida: string): string[] => {
     const ids: string[] = [id_partida];
-    
+
     // Agregar subpartidas recursivamente
     const subpartidas = partidas.filter(p => p.id_partida_padre === id_partida);
     subpartidas.forEach(subpartida => {
       ids.push(...obtenerIdsBloquePartida(subpartida.id_partida));
     });
-    
+
     return ids;
   }, [partidas]);
 
@@ -209,10 +210,10 @@ export default function EstructuraPresupuestoEditor({
   const calcularNivelDinamico = useCallback((id_titulo: string): number => {
     const titulo = titulos.find(t => t.id_titulo === id_titulo);
     if (!titulo) return 1;
-    
+
     // Si no tiene padre, es nivel 1
     if (!titulo.id_titulo_padre) return 1;
-    
+
     // Si tiene padre, calcular recursivamente
     return calcularNivelDinamico(titulo.id_titulo_padre) + 1;
   }, [titulos]);
@@ -231,7 +232,7 @@ export default function EstructuraPresupuestoEditor({
       }
       return t;
     }));
-    
+
     // Actualizar recursivamente todos los descendientes
     const hijos = titulos.filter(t => t.id_titulo_padre === id_titulo);
     hijos.forEach(hijo => {
@@ -247,7 +248,7 @@ export default function EstructuraPresupuestoEditor({
    * Crea una estructura unificada que mezcla títulos y partidas por orden
    * dentro del mismo padre, respetando la jerarquía
    */
-  type ItemUnificado = 
+  type ItemUnificado =
     | { tipo: 'TITULO'; data: Titulo }
     | { tipo: 'PARTIDA'; data: Partida };
 
@@ -257,18 +258,18 @@ export default function EstructuraPresupuestoEditor({
    */
   const tieneAncestroColapsado = useCallback((id_titulo: string | null): boolean => {
     if (!id_titulo) return false;
-    
+
     const titulo = titulos.find(t => t.id_titulo === id_titulo);
     if (!titulo) return false;
-    
+
     // Si este título está colapsado, retornar true
     if (titulosColapsados.has(id_titulo)) return true;
-    
+
     // Si tiene padre, verificar recursivamente
     if (titulo.id_titulo_padre) {
       return tieneAncestroColapsado(titulo.id_titulo_padre);
     }
-    
+
     return false;
   }, [titulos, titulosColapsados]);
 
@@ -281,17 +282,17 @@ export default function EstructuraPresupuestoEditor({
     if ('id_titulo_padre' in item && !item.id_titulo_padre) {
       return false;
     }
-    
+
     if ('id_titulo_padre' in item && item.id_titulo_padre) {
       // Es un título con padre: verificar si algún ancestro está colapsado
       return tieneAncestroColapsado(item.id_titulo_padre);
     }
-    
+
     if ('id_partida_padre' in item && item.id_partida_padre) {
       // Es una subpartida: verificar si la partida padre está colapsada
       if (partidasColapsadas.has(item.id_partida_padre)) return true;
     }
-    
+
     // Es una partida principal: verificar si el título al que pertenece tiene ancestros colapsados
     if ('id_titulo' in item && item.id_titulo) {
       const tituloPadre = titulos.find(t => t.id_titulo === item.id_titulo);
@@ -304,7 +305,7 @@ export default function EstructuraPresupuestoEditor({
         return tieneAncestroColapsado(tituloPadre.id_titulo);
       }
     }
-    
+
     return false;
   }, [titulosColapsados, partidasColapsadas, titulos, tieneAncestroColapsado]);
 
@@ -390,19 +391,19 @@ export default function EstructuraPresupuestoEditor({
       items.forEach(item => {
         // Crear clave única para evitar duplicados
         const clave = item.tipo === 'TITULO' ? `TIT-${item.data.id_titulo}` : `PAR-${item.data.id_partida}`;
-        
+
         // Solo agregar si no se ha procesado antes
         if (!itemsProcesados.has(clave)) {
           itemsProcesados.add(clave);
           resultado.push(item);
-          
+
           // Si es un título y NO está colapsado, agregar recursivamente sus hijos
           // Esto asegura que todos los descendientes se oculten cuando un título está colapsado
           if (item.tipo === 'TITULO' && !titulosColapsados.has(item.data.id_titulo)) {
             construirEstructura(item.data.id_titulo);
           }
         }
-        
+
         // NOTA: Las subpartidas NO se muestran aquí, se mostrarán junto con los recursos
         // dentro de cada partida en otra sección/componente
       });
@@ -436,7 +437,7 @@ export default function EstructuraPresupuestoEditor({
   const calcularNumeroItem = useCallback((item: Titulo | Partida, tipo: 'TITULO' | 'PARTIDA'): string => {
     if (tipo === 'TITULO') {
       const titulo = item as Titulo;
-      
+
       // Si no tiene padre, es nivel raíz
       if (!titulo.id_titulo_padre) {
         // Contar cuántos títulos raíz hay antes de este (según orden)
@@ -446,62 +447,62 @@ export default function EstructuraPresupuestoEditor({
         const indice = titulosRaiz.findIndex(t => t.id_titulo === titulo.id_titulo);
         return String(indice + 1);
       }
-      
+
       // Tiene padre, calcular basado en el padre
       const padre = titulos.find(t => t.id_titulo === titulo.id_titulo_padre);
       if (!padre) return '0';
-      
+
       // Obtener todos los items del mismo padre (títulos y partidas) ordenados
       const itemsMismoPadre: Array<{ id: string; tipo: 'TITULO' | 'PARTIDA'; orden: number }> = [];
-      
+
       // Títulos hermanos
       titulos
         .filter(t => t.id_titulo_padre === titulo.id_titulo_padre)
         .forEach(t => itemsMismoPadre.push({ id: t.id_titulo, tipo: 'TITULO', orden: t.orden }));
-      
+
       // Partidas del padre
       partidas
         .filter(p => p.id_titulo === titulo.id_titulo_padre && p.id_partida_padre === null)
         .forEach(p => itemsMismoPadre.push({ id: p.id_partida, tipo: 'PARTIDA', orden: p.orden }));
-      
+
       // Ordenar por orden
       itemsMismoPadre.sort((a, b) => a.orden - b.orden);
-      
+
       // Encontrar posición del título actual
       const indice = itemsMismoPadre.findIndex(item => item.id === titulo.id_titulo && item.tipo === 'TITULO');
       const numeroSecuencia = String(indice + 1);
-      
+
       // Calcular numero_item del padre recursivamente
       const numeroPadre = calcularNumeroItem(padre, 'TITULO');
       return `${numeroPadre}.${numeroSecuencia}`;
     } else {
       // Es una partida
       const partida = item as Partida;
-      
+
       // Obtener el título al que pertenece
       const tituloPadre = titulos.find(t => t.id_titulo === partida.id_titulo);
       if (!tituloPadre) return '0';
-      
+
       // Obtener todos los items del mismo nivel (títulos hijos y partidas del título padre) ordenados
       const itemsMismoPadre: Array<{ id: string; tipo: 'TITULO' | 'PARTIDA'; orden: number }> = [];
-      
+
       // Títulos hijos del título padre (hermanos de la partida)
       titulos
         .filter(t => t.id_titulo_padre === partida.id_titulo)
         .forEach(t => itemsMismoPadre.push({ id: t.id_titulo, tipo: 'TITULO', orden: t.orden }));
-      
+
       // Partidas del título padre (incluyendo la actual)
       partidas
         .filter(p => p.id_titulo === partida.id_titulo && p.id_partida_padre === null)
         .forEach(p => itemsMismoPadre.push({ id: p.id_partida, tipo: 'PARTIDA', orden: p.orden }));
-      
+
       // Ordenar por orden (títulos y partidas mezclados)
       itemsMismoPadre.sort((a, b) => a.orden - b.orden);
-      
+
       // Encontrar posición de la partida actual
       const indice = itemsMismoPadre.findIndex(item => item.id === partida.id_partida && item.tipo === 'PARTIDA');
       const numeroSecuencia = String(indice + 1);
-      
+
       // Calcular numero_item del título padre recursivamente
       const numeroPadre = calcularNumeroItem(tituloPadre, 'TITULO');
       return `${numeroPadre}.${numeroSecuencia}`;
@@ -590,34 +591,34 @@ export default function EstructuraPresupuestoEditor({
 
     const handleMouseMove = (e: MouseEvent) => {
       const now = performance.now();
-      
+
       // Throttle: solo procesar si ha pasado suficiente tiempo
       if (now - lastUpdateTime < throttleMs) {
         return;
       }
-      
+
       // Cancelar cualquier RAF pendiente
       if (rafId !== null) {
         cancelAnimationFrame(rafId);
       }
-      
+
       // Usar requestAnimationFrame para sincronizar con el ciclo de renderizado
       rafId = requestAnimationFrame(() => {
         if (!containerRef.current) return;
-        
+
         const container = containerRef.current;
         const containerRect = container.getBoundingClientRect();
         const containerHeight = containerRect.height;
-        
+
         // Posición del mouse relativa al contenedor (desde el top)
         const mouseY = e.clientY - containerRect.top;
-        
+
         // Calcular porcentaje del panel inferior basado en la posición del mouse
         // Cuando el mouse BAJA (mouseY aumenta hacia abajo), el panel inferior debe HACERSE PEQUEÑO
         // Cuando el mouse SUBE (mouseY disminuye hacia arriba), el panel inferior debe CRECER
         // Por lo tanto: porcentaje = ((containerHeight - mouseY) / containerHeight) * 100
         const newHeight = ((containerHeight - mouseY) / containerHeight) * 100;
-        
+
         // Limitar entre 15% y 70%
         const clampedHeight = Math.max(15, Math.min(70, newHeight));
         setPanelInferiorHeight(clampedHeight);
@@ -664,7 +665,7 @@ export default function EstructuraPresupuestoEditor({
       const titulosDelPadre = prevTitulos
         .filter(t => t.id_titulo_padre === idPadre)
         .sort((a, b) => a.orden - b.orden);
-      
+
       return prevTitulos.map(t => {
         if (t.id_titulo_padre === idPadre) {
           const indice = titulosDelPadre.findIndex(tit => tit.id_titulo === t.id_titulo);
@@ -673,7 +674,7 @@ export default function EstructuraPresupuestoEditor({
         return t;
       });
     });
-    
+
     // Reordenar partidas (necesitamos el estado actualizado de titulos)
     setTitulos(prevTitulos => {
       setPartidas(prevPartidas => {
@@ -685,12 +686,12 @@ export default function EstructuraPresupuestoEditor({
             return p.id_titulo === idPadre && p.id_partida_padre === null;
           })
           .sort((a, b) => a.orden - b.orden);
-        
+
         return prevPartidas.map(p => {
           const esPartidaDelPadre = idPadre === null
             ? prevTitulos.some(t => t.id_titulo === p.id_titulo && t.id_titulo_padre === null) && p.id_partida_padre === null
             : p.id_titulo === idPadre && p.id_partida_padre === null;
-          
+
           if (esPartidaDelPadre) {
             const indice = partidasDelPadre.findIndex(part => part.id_partida === p.id_partida);
             return { ...p, orden: indice + 1 };
@@ -698,7 +699,7 @@ export default function EstructuraPresupuestoEditor({
           return p;
         });
       });
-      
+
       return prevTitulos;
     });
   }, []);
@@ -711,17 +712,17 @@ export default function EstructuraPresupuestoEditor({
     if (!tipo) return [];
 
     let id_padre: string | null = null;
-    
+
     if (tipo === 'TITULO') {
       const titulo = titulos.find(t => t.id_titulo === id);
       if (!titulo) return [];
       id_padre = titulo.id_titulo_padre;
-      
+
       // Obtener títulos del mismo padre
       const titulosMismoPadre = titulos
         .filter(t => t.id_titulo_padre === id_padre)
         .map(t => ({ id: t.id_titulo, tipo: 'TITULO' as const, orden: t.orden }));
-      
+
       // Obtener partidas del mismo padre (si el padre es un título)
       let partidasMismoPadre: Array<{ id: string; tipo: 'PARTIDA'; orden: number }> = [];
       if (id_padre) {
@@ -739,30 +740,30 @@ export default function EstructuraPresupuestoEditor({
           partidasMismoPadre.push(...partidasTitulo);
         });
       }
-      
+
       // Combinar y ordenar
       return [...titulosMismoPadre, ...partidasMismoPadre].sort((a, b) => a.orden - b.orden);
     } else {
       // Es una partida principal (sin id_partida_padre)
       const partida = partidas.find(p => p.id_partida === id);
       if (!partida) return [];
-      
+
       // Para partidas principales, el "padre" es el título al que pertenecen
       // Necesitamos obtener todos los items del mismo título (títulos hijos y partidas)
       const id_titulo = partida.id_titulo;
-      
+
       const itemsMismoPadre: Array<{ id: string; tipo: 'TITULO' | 'PARTIDA'; orden: number }> = [];
-      
+
       // Obtener títulos hijos del título al que pertenece la partida
       titulos
         .filter(t => t.id_titulo_padre === id_titulo)
         .forEach(t => itemsMismoPadre.push({ id: t.id_titulo, tipo: 'TITULO', orden: t.orden }));
-      
+
       // Obtener partidas del mismo título (solo principales, sin id_partida_padre)
       partidas
         .filter(p => p.id_titulo === id_titulo && p.id_partida_padre === null)
         .forEach(p => itemsMismoPadre.push({ id: p.id_partida, tipo: 'PARTIDA', orden: p.orden }));
-      
+
       // Ordenar por orden (títulos y partidas mezclados)
       return itemsMismoPadre.sort((a, b) => a.orden - b.orden);
     }
@@ -781,17 +782,17 @@ export default function EstructuraPresupuestoEditor({
 
     if (itemSeleccionado) {
       const tipoSeleccionado = obtenerTipoItem(itemSeleccionado);
-      
+
       if (tipoSeleccionado === 'TITULO') {
         // Si se selecciona un título, crear como HIJO de ese título
         const tituloSeleccionado = titulos.find(t => t.id_titulo === itemSeleccionado);
         if (tituloSeleccionado) {
           nuevoIdPadre = tituloSeleccionado.id_titulo; // El título seleccionado será el padre
           nuevoNivel = tituloSeleccionado.nivel + 1; // Un nivel más profundo
-          
+
           // Obtener todos los hijos directos del título seleccionado (solo títulos hijos)
           const hijosDirectos = titulos.filter(t => t.id_titulo_padre === tituloSeleccionado.id_titulo);
-          nuevoOrden = hijosDirectos.length > 0 
+          nuevoOrden = hijosDirectos.length > 0
             ? Math.max(...hijosDirectos.map(t => t.orden)) + 1
             : 1;
         }
@@ -800,16 +801,16 @@ export default function EstructuraPresupuestoEditor({
         const partidaSeleccionada = partidas.find(p => p.id_partida === itemSeleccionado);
         if (partidaSeleccionada) {
           nuevoIdPadre = partidaSeleccionada.id_titulo; // El título de la partida será el padre
-          
+
           // Calcular el nivel basándose en el título padre
           const tituloPadre = titulos.find(t => t.id_titulo === partidaSeleccionada.id_titulo);
           if (tituloPadre) {
             nuevoNivel = tituloPadre.nivel + 1;
           }
-          
+
           // Obtener todos los hijos directos del título
           const hijosDirectos = titulos.filter(t => t.id_titulo_padre === partidaSeleccionada.id_titulo);
-          nuevoOrden = hijosDirectos.length > 0 
+          nuevoOrden = hijosDirectos.length > 0
             ? Math.max(...hijosDirectos.map(t => t.orden)) + 1
             : 1;
         }
@@ -817,7 +818,7 @@ export default function EstructuraPresupuestoEditor({
     } else {
       // No hay item seleccionado: crear al final de los títulos raíz (sin padre)
       const titulosRaiz = titulos.filter(t => t.id_titulo_padre === null);
-      nuevoOrden = titulosRaiz.length > 0 
+      nuevoOrden = titulosRaiz.length > 0
         ? Math.max(...titulosRaiz.map(t => t.orden)) + 1
         : 1;
     }
@@ -828,7 +829,7 @@ export default function EstructuraPresupuestoEditor({
     setNombreItem('');
     setTipoItemModal('TITULO');
     setModalAbierto(true);
-    
+
     // Guardar temporalmente los datos del nuevo título
     (window as any).__nuevoTituloTemp = {
       id_padre: nuevoIdPadre,
@@ -850,17 +851,17 @@ export default function EstructuraPresupuestoEditor({
 
     if (itemSeleccionado) {
       const tipoSeleccionado = obtenerTipoItem(itemSeleccionado);
-      
+
       if (tipoSeleccionado === 'TITULO') {
         // Si se selecciona un título, crear partida dentro de ese título
         nuevoIdTitulo = itemSeleccionado;
         const tituloSeleccionado = titulos.find(t => t.id_titulo === itemSeleccionado);
         if (tituloSeleccionado) {
           nuevoNivel = 1;
-          
+
           // Obtener todas las partidas del título
           const partidasDelTitulo = partidas.filter(p => p.id_titulo === nuevoIdTitulo && p.id_partida_padre === null);
-          nuevoOrden = partidasDelTitulo.length > 0 
+          nuevoOrden = partidasDelTitulo.length > 0
             ? Math.max(...partidasDelTitulo.map(p => p.orden)) + 1
             : 1;
         }
@@ -870,10 +871,10 @@ export default function EstructuraPresupuestoEditor({
         if (partidaSeleccionada) {
           nuevoIdTitulo = partidaSeleccionada.id_titulo;
           nuevoNivel = partidaSeleccionada.nivel_partida;
-          
+
           // Obtener todos los hermanos (títulos y partidas) del mismo título
           const hermanos = obtenerItemsMismoPadre(itemSeleccionado);
-          nuevoOrden = hermanos.length > 0 
+          nuevoOrden = hermanos.length > 0
             ? Math.max(...hermanos.map(h => h.orden)) + 1
             : 1;
         }
@@ -884,7 +885,7 @@ export default function EstructuraPresupuestoEditor({
       if (titulosRaiz.length > 0) {
         nuevoIdTitulo = titulosRaiz[0].id_titulo;
         const partidasDelTitulo = partidas.filter(p => p.id_titulo === nuevoIdTitulo && p.id_partida_padre === null);
-        nuevoOrden = partidasDelTitulo.length > 0 
+        nuevoOrden = partidasDelTitulo.length > 0
           ? Math.max(...partidasDelTitulo.map(p => p.orden)) + 1
           : 1;
       }
@@ -901,7 +902,7 @@ export default function EstructuraPresupuestoEditor({
     setNombreItem('');
     setTipoItemModal('PARTIDA');
     setModalAbierto(true);
-    
+
     // Guardar temporalmente los datos de la nueva partida en el estado
     // Usaremos un objeto temporal que se guardará cuando se confirme el nombre
     (window as any).__nuevaPartidaTemp = {
@@ -964,7 +965,7 @@ export default function EstructuraPresupuestoEditor({
     if (tipoItemModal === 'TITULO') {
       if (tituloEditando) {
         // Actualizar título existente solo en estado local
-        setTitulos(prev => prev.map(t => 
+        setTitulos(prev => prev.map(t =>
           t.id_titulo === tituloEditando.id_titulo
             ? { ...t, descripcion: nombreGuardar.trim(), id_especialidad: id_especialidad !== undefined ? id_especialidad : t.id_especialidad }
             : t
@@ -974,8 +975,8 @@ export default function EstructuraPresupuestoEditor({
         const tempData = (window as any).__nuevoTituloTemp;
         if (tempData && id_proyecto_real) {
           // Calcular el nivel correcto basándose en el padre
-          const nivelCalculado = tempData.id_padre 
-            ? calcularNivelDinamico(tempData.id_padre) + 1 
+          const nivelCalculado = tempData.id_padre
+            ? calcularNivelDinamico(tempData.id_padre) + 1
             : 1;
 
           // Generar numero_item temporal basado en el orden
@@ -1084,7 +1085,7 @@ export default function EstructuraPresupuestoEditor({
 
     const tipoCortado = obtenerTipoItem(itemCortado);
     const tipoDestino = obtenerTipoItem(idDestino);
-    
+
     if (!tipoCortado || !tipoDestino) return;
 
     // Validar que no se intente mover un título a ser hijo de sí mismo o de sus descendientes
@@ -1098,7 +1099,7 @@ export default function EstructuraPresupuestoEditor({
 
     // Obtener el nuevo padre basado en el destino
     let nuevoIdPadre: string | null = null;
-    
+
     if (tipoDestino === 'TITULO') {
       const tituloDestino = titulos.find(t => t.id_titulo === idDestino);
       if (tituloDestino) {
@@ -1114,7 +1115,7 @@ export default function EstructuraPresupuestoEditor({
 
     // Obtener el orden máximo del nuevo padre para colocar al final
     const itemsMismoPadre = obtenerItemsMismoPadre(idDestino);
-    const maxOrden = itemsMismoPadre.length > 0 
+    const maxOrden = itemsMismoPadre.length > 0
       ? Math.max(...itemsMismoPadre.map(item => item.orden))
       : 0;
     const nuevoOrden = maxOrden + 1;
@@ -1122,17 +1123,17 @@ export default function EstructuraPresupuestoEditor({
     // Actualizar el bloque cortado
     if (tipoCortado === 'TITULO') {
       const idsBloque = obtenerIdsBloqueTitulo(itemCortado);
-      
+
       // Obtener el padre original antes de mover
       const tituloCortado = titulos.find(t => t.id_titulo === itemCortado);
       const idPadreOriginal = tituloCortado?.id_titulo_padre || null;
-      
+
       // Calcular el nuevo nivel basándose en el nuevo padre
       let nuevoNivel = 1;
       if (nuevoIdPadre) {
         nuevoNivel = calcularNivelDinamico(nuevoIdPadre) + 1;
       }
-      
+
       setTitulos(prev => {
         const actualizados = prev.map(t => {
           if (t.id_titulo === itemCortado) {
@@ -1144,7 +1145,7 @@ export default function EstructuraPresupuestoEditor({
           }
           return t;
         });
-        
+
         // Actualizar niveles de todos los descendientes del título movido recursivamente
         // Usar un Set para evitar bucles infinitos por referencias circulares
         const procesados = new Set<string>();
@@ -1154,7 +1155,7 @@ export default function EstructuraPresupuestoEditor({
             return;
           }
           procesados.add(id);
-          
+
           actualizados.forEach(t => {
             if (t.id_titulo_padre === id) {
               t.nivel = nivelBase + 1;
@@ -1163,10 +1164,10 @@ export default function EstructuraPresupuestoEditor({
           });
         };
         actualizarDescendientes(itemCortado, nuevoNivel);
-        
+
         return actualizados;
       });
-      
+
       // Reordenar los hermanos del padre original y del nuevo padre después de actualizar
       // Usar un pequeño delay para asegurar que el estado se haya actualizado
       setTimeout(() => {
@@ -1208,12 +1209,12 @@ export default function EstructuraPresupuestoEditor({
 
     const itemsMismoPadre = obtenerItemsMismoPadre(id);
     const itemActual = itemsMismoPadre.find(item => item.id === id);
-    
+
     if (!itemActual || itemActual.orden === 1) return; // Ya está en la primera posición
 
     const ordenNuevo = itemActual.orden - 1;
     const itemAnterior = itemsMismoPadre.find(item => item.orden === ordenNuevo);
-    
+
     if (!itemAnterior) return;
 
     // Intercambiar ordenes: el item actual y el anterior
@@ -1281,15 +1282,15 @@ export default function EstructuraPresupuestoEditor({
 
     const itemsMismoPadre = obtenerItemsMismoPadre(id);
     const itemActual = itemsMismoPadre.find(item => item.id === id);
-    
+
     if (!itemActual) return;
-    
+
     const maxOrden = Math.max(...itemsMismoPadre.map(item => item.orden));
     if (itemActual.orden === maxOrden) return; // Ya está en la última posición
 
     const ordenNuevo = itemActual.orden + 1;
     const itemSiguiente = itemsMismoPadre.find(item => item.orden === ordenNuevo);
-    
+
     if (!itemSiguiente) return;
 
     // Intercambiar ordenes: el item actual y el siguiente
@@ -1366,12 +1367,12 @@ export default function EstructuraPresupuestoEditor({
       // Una partida puede moverse a la izquierda si tiene un padre de partida
       // o si hay un hermano anterior que pueda ser su padre
       if (partida.id_partida_padre !== null) return true;
-      
+
       // Si es partida principal, verificar si hay un hermano anterior
       const itemsMismoPadre = obtenerItemsMismoPadre(id);
       const itemActual = itemsMismoPadre.find(item => item.id === id);
       if (!itemActual || itemActual.orden === 1) return false; // No hay hermano anterior
-      
+
       // Verificar si el hermano anterior es un título (puede ser padre)
       const hermanoAnterior = itemsMismoPadre.find(item => item.orden === itemActual.orden - 1);
       return hermanoAnterior?.tipo === 'TITULO';
@@ -1388,12 +1389,12 @@ export default function EstructuraPresupuestoEditor({
 
     const itemsMismoPadre = obtenerItemsMismoPadre(id);
     const itemActual = itemsMismoPadre.find(item => item.id === id);
-    
+
     if (!itemActual || itemActual.orden === 1) return false; // No hay hermano anterior
 
     // Buscar el hermano anterior
     const hermanoAnterior = itemsMismoPadre.find(item => item.orden === itemActual.orden - 1);
-    
+
     if (!hermanoAnterior) return false;
 
     if (tipo === 'TITULO') {
@@ -1427,13 +1428,13 @@ export default function EstructuraPresupuestoEditor({
       const nuevoIdPadre = padreActual.id_titulo_padre;
 
       // Calcular nuevo nivel
-      const nuevoNivel = nuevoIdPadre 
-        ? calcularNivelDinamico(nuevoIdPadre) + 1 
+      const nuevoNivel = nuevoIdPadre
+        ? calcularNivelDinamico(nuevoIdPadre) + 1
         : 1;
 
       // Obtener el orden máximo de los hermanos del padre actual
       const itemsMismoPadre = obtenerItemsMismoPadre(padreActual.id_titulo);
-      const maxOrden = itemsMismoPadre.length > 0 
+      const maxOrden = itemsMismoPadre.length > 0
         ? Math.max(...itemsMismoPadre.map(item => item.orden))
         : 0;
       const nuevoOrden = maxOrden + 1;
@@ -1452,7 +1453,7 @@ export default function EstructuraPresupuestoEditor({
         const actualizarDescendientes = (idTitulo: string, nivelBase: number) => {
           if (procesados.has(idTitulo)) return;
           procesados.add(idTitulo);
-          
+
           actualizados.forEach(t => {
             if (t.id_titulo_padre === idTitulo) {
               t.nivel = nivelBase + 1;
@@ -1487,15 +1488,15 @@ export default function EstructuraPresupuestoEditor({
         const partidasDelTitulo = partidas.filter(
           p => p.id_titulo === partidaPadre.id_titulo && p.id_partida_padre === null
         );
-        const maxOrden = partidasDelTitulo.length > 0 
+        const maxOrden = partidasDelTitulo.length > 0
           ? Math.max(...partidasDelTitulo.map(p => p.orden))
           : 0;
         const nuevoOrden = maxOrden + 1;
 
         setPartidas(prev => prev.map(p => {
           if (p.id_partida === id) {
-            return { 
-              ...p, 
+            return {
+              ...p,
               id_titulo: partidaPadre.id_titulo,
               id_partida_padre: null,
               nivel_partida: 1,
@@ -1517,7 +1518,7 @@ export default function EstructuraPresupuestoEditor({
         const partidasDelTitulo = partidas.filter(
           p => p.id_titulo === tituloAbuelo.id_titulo && p.id_partida_padre === null
         );
-        const maxOrden = partidasDelTitulo.length > 0 
+        const maxOrden = partidasDelTitulo.length > 0
           ? Math.max(...partidasDelTitulo.map(p => p.orden))
           : 0;
         const nuevoOrden = maxOrden + 1;
@@ -1542,7 +1543,7 @@ export default function EstructuraPresupuestoEditor({
 
     const itemsMismoPadre = obtenerItemsMismoPadre(id);
     const itemActual = itemsMismoPadre.find(item => item.id === id);
-    
+
     if (!itemActual || itemActual.orden === 1) return;
 
     const hermanoAnterior = itemsMismoPadre.find(item => item.orden === itemActual.orden - 1);
@@ -1555,7 +1556,7 @@ export default function EstructuraPresupuestoEditor({
 
       // Obtener el orden máximo de los hijos del hermano anterior
       const hijosDelHermano = titulos.filter(t => t.id_titulo_padre === nuevoIdPadre);
-      const maxOrden = hijosDelHermano.length > 0 
+      const maxOrden = hijosDelHermano.length > 0
         ? Math.max(...hijosDelHermano.map(t => t.orden))
         : 0;
       const nuevoOrden = maxOrden + 1;
@@ -1577,7 +1578,7 @@ export default function EstructuraPresupuestoEditor({
         const actualizarDescendientes = (idTitulo: string, nivelBase: number) => {
           if (procesados.has(idTitulo)) return;
           procesados.add(idTitulo);
-          
+
           actualizados.forEach(t => {
             if (t.id_titulo_padre === idTitulo) {
               t.nivel = nivelBase + 1;
@@ -1609,7 +1610,7 @@ export default function EstructuraPresupuestoEditor({
       const partidasDelTitulo = partidas.filter(
         p => p.id_titulo === nuevoIdTitulo && p.id_partida_padre === null
       );
-      const maxOrden = partidasDelTitulo.length > 0 
+      const maxOrden = partidasDelTitulo.length > 0
         ? Math.max(...partidasDelTitulo.map(p => p.orden))
         : 0;
       const nuevoOrden = maxOrden + 1;
@@ -1691,12 +1692,12 @@ export default function EstructuraPresupuestoEditor({
             return prev.filter(p => !partidasAEliminar.has(p.id_partida));
           });
         }
-        
+
         // Limpiar selección si el item eliminado estaba seleccionado
         if (itemSeleccionado === id_titulo || idsDescendientes.includes(itemSeleccionado || '')) {
           setItemSeleccionado(null);
         }
-        
+
         // Limpiar item cortado si estaba en el bloque eliminado
         if (itemCortado && idsDescendientes.includes(itemCortado)) {
           setItemCortado(null);
@@ -1742,12 +1743,12 @@ export default function EstructuraPresupuestoEditor({
           });
           setPartidas(prev => prev.filter(p => !idsDescendientes.includes(p.id_partida)));
         }
-        
+
         // Limpiar selección si el item eliminado estaba seleccionado
         if (itemSeleccionado === id_partida || idsDescendientes.includes(itemSeleccionado || '')) {
           setItemSeleccionado(null);
         }
-        
+
         // Limpiar item cortado si estaba en el bloque eliminado
         if (itemCortado && idsDescendientes.includes(itemCortado)) {
           setItemCortado(null);
@@ -1775,7 +1776,7 @@ export default function EstructuraPresupuestoEditor({
       if (titulo.id_titulo.startsWith('temp_')) {
         return true;
       }
-      
+
       // Verificar si está modificado
       const original = titulosOriginalesMap.get(titulo.id_titulo);
       if (original && (
@@ -1795,7 +1796,7 @@ export default function EstructuraPresupuestoEditor({
       if (partida.id_partida.startsWith('temp_')) {
         return true;
       }
-      
+
       // Verificar si está modificada
       const original = partidasOriginalesMap.get(partida.id_partida);
       if (original && (
@@ -1810,7 +1811,7 @@ export default function EstructuraPresupuestoEditor({
         return true;
       }
     }
-    
+
     return false;
   }, [titulos, partidas, titulosOriginales, partidasOriginales, titulosEliminados, partidasEliminadas]);
 
@@ -1824,9 +1825,10 @@ export default function EstructuraPresupuestoEditor({
     }
 
     try {
+      setIsSaving(true);
       // Preparar datos para la mutación batch
       const mapeoIdsTitulos: Map<string, string> = new Map(); // temp_id -> real_id (se llenará con la respuesta)
-      
+
       // 1. Preparar títulos nuevos
       const titulosNuevos = titulos.filter(t => t.id_titulo.startsWith('temp_'));
       const titulosCrear = titulosNuevos.map(titulo => {
@@ -1873,16 +1875,16 @@ export default function EstructuraPresupuestoEditor({
       // 3. Preparar títulos a actualizar
       // Si hay elementos eliminados, todos los elementos restantes deben actualizar su numero_item
       const hayEliminaciones = titulosEliminados.size > 0 || partidasEliminadas.size > 0;
-      
+
       const titulosActualizar = titulos
         .filter(t => !t.id_titulo.startsWith('temp_'))
         .map(titulo => {
           const original = titulosOriginales.find(t => t.id_titulo === titulo.id_titulo);
           if (!original) return null;
-          
+
           // Calcular numero_item dinámicamente basado en la posición jerárquica actual
           const numeroItemCalculado = calcularNumeroItem(titulo, 'TITULO');
-          
+
           const cambios: any = { id_titulo: titulo.id_titulo };
           if (titulo.descripcion !== original.descripcion) cambios.descripcion = titulo.descripcion;
           if (titulo.id_titulo_padre !== original.id_titulo_padre) cambios.id_titulo_padre = titulo.id_titulo_padre;
@@ -1895,10 +1897,10 @@ export default function EstructuraPresupuestoEditor({
           }
           if (titulo.tipo !== original.tipo) cambios.tipo = titulo.tipo;
           if (titulo.total_parcial !== original.total_parcial) cambios.total_parcial = titulo.total_parcial;
-          
+
           // Verificar si hay cambios además del id_titulo
           const tieneCambios = Object.keys(cambios).length > 0;
-          
+
           // Incluir id_especialidad si cambió o si hay otros cambios (para asegurar que se guarde correctamente en cambios globales)
           if (titulo.id_especialidad !== original.id_especialidad) {
             cambios.id_especialidad = titulo.id_especialidad || null;
@@ -1906,7 +1908,7 @@ export default function EstructuraPresupuestoEditor({
             // Si hay otros cambios, incluir id_especialidad también para asegurar que se guarde correctamente
             cambios.id_especialidad = titulo.id_especialidad || null;
           }
-          
+
           return Object.keys(cambios).length > 1 ? cambios : null; // Solo si hay cambios además del id
         })
         .filter((t): t is NonNullable<typeof t> => t !== null);
@@ -1917,10 +1919,10 @@ export default function EstructuraPresupuestoEditor({
         .map(partida => {
           const original = partidasOriginales.find(p => p.id_partida === partida.id_partida);
           if (!original) return null;
-          
+
           // Calcular numero_item dinámicamente basado en la posición jerárquica actual
           const numeroItemCalculado = calcularNumeroItem(partida, 'PARTIDA');
-          
+
           const cambios: any = { id_partida: partida.id_partida };
           if (partida.descripcion !== original.descripcion) cambios.descripcion = partida.descripcion;
           if (partida.id_titulo !== original.id_titulo) cambios.id_titulo = partida.id_titulo;
@@ -1937,7 +1939,7 @@ export default function EstructuraPresupuestoEditor({
           }
           if (partida.estado !== original.estado) cambios.estado = partida.estado;
           if (partida.parcial_partida !== original.parcial_partida) cambios.parcial_partida = partida.parcial_partida;
-          
+
           return Object.keys(cambios).length > 1 ? cambios : null; // Solo si hay cambios además del id
         })
         .filter((p): p is NonNullable<typeof p> => p !== null);
@@ -2040,6 +2042,8 @@ export default function EstructuraPresupuestoEditor({
     } catch (error: any) {
       console.error('Error al guardar cambios:', error);
       toast.error(error?.message || 'Error al guardar los cambios. Se hizo rollback de todas las operaciones.');
+    } finally {
+      setIsSaving(false);
     }
   }, [
     hayCambiosPendientes,
@@ -2064,10 +2068,10 @@ export default function EstructuraPresupuestoEditor({
     if (tipo === 'PARTIDA') {
       return 'text-[var(--text-primary)]';
     }
-    
+
     // Calcular el nivel dinámicamente basándose en la jerarquía actual
     const nivel = calcularNivelDinamico(id_titulo);
-    
+
     // Los títulos se colorean según su nivel
     // Nivel 1: Azul
     // Nivel 2: Naranja
@@ -2112,7 +2116,7 @@ export default function EstructuraPresupuestoEditor({
       <div className="bg-[var(--background)] backdrop-blur-sm rounded-lg border border-[var(--border-color)] p-8">
         <div className="text-center">
           <p className="text-sm text-red-500">Error al cargar la estructura del presupuesto</p>
-          <p className="text-xs text-[var(--text-secondary)] mt-2">
+          <p className="text-sm text-[var(--text-secondary)] mt-2">
             {error instanceof Error ? error.message : 'Error desconocido'}
           </p>
         </div>
@@ -2144,7 +2148,7 @@ export default function EstructuraPresupuestoEditor({
               <ArrowLeft className="h-3 w-3" />
             </Button>
           )}
-          <span className="text-[10px] text-[var(--text-secondary)] truncate uppercase font-bold">
+          <span className="text-xs text-[var(--text-secondary)] truncate uppercase font-bold">
             {nombrePresupuestoReal}
             {estructuraData?.presupuesto?.total_presupuesto !== undefined && (
               <span className="ml-2 font-semibold text-[var(--text-primary)]">
@@ -2160,15 +2164,18 @@ export default function EstructuraPresupuestoEditor({
               size="sm"
               variant={hayCambiosPendientes ? "default" : "outline"}
               onClick={handleGuardarCambios}
-              disabled={!hayCambiosPendientes || createTitulo.isPending || updateTitulo.isPending || createPartida.isPending || updatePartida.isPending || deleteTitulo.isPending || deletePartida.isPending}
-              className={`flex items-center gap-1.5 h-6 px-2 text-[10px] ${
-                hayCambiosPendientes ? 'bg-blue-600 hover:bg-blue-700 text-white' : ''
-              }`}
+              disabled={(!hayCambiosPendientes && !isSaving) || isSaving || createTitulo.isPending || updateTitulo.isPending || createPartida.isPending || updatePartida.isPending || deleteTitulo.isPending || deletePartida.isPending}
+              className={`flex items-center gap-1.5 h-6 px-2 text-xs ${hayCambiosPendientes ? 'bg-blue-600 hover:bg-blue-700 text-white' : ''
+                }`}
               title={hayCambiosPendientes ? 'Guardar cambios pendientes' : 'No hay cambios para guardar'}
             >
-              <Save className="h-3 w-3" />
-              {hayCambiosPendientes ? 'Guardar cambios' : 'Sin cambios'}
-              {hayCambiosPendientes && (
+              {isSaving ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Save className="h-3 w-3" />
+              )}
+              {isSaving ? 'Guardando...' : (hayCambiosPendientes ? 'Guardar cambios' : 'Sin cambios')}
+              {hayCambiosPendientes && !isSaving && (
                 <span className="ml-1 w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
               )}
             </Button>
@@ -2290,7 +2297,7 @@ export default function EstructuraPresupuestoEditor({
                 size="sm"
                 variant="outline"
                 onClick={handleCrearTitulo}
-                className="flex items-center gap-1 h-6 px-1.5 text-[10px]"
+                className="flex items-center gap-1 h-6 px-1.5 text-xs"
                 title="Crear nuevo título"
               >
                 <Plus className="h-3 w-3" />
@@ -2300,7 +2307,7 @@ export default function EstructuraPresupuestoEditor({
                 size="sm"
                 variant="outline"
                 onClick={handleCrearPartida}
-                className="flex items-center gap-1 h-6 px-1.5 text-[10px]"
+                className="flex items-center gap-1 h-6 px-1.5 text-xs"
                 title="Crear nueva partida"
               >
                 <Plus className="h-3 w-3" />
@@ -2314,211 +2321,211 @@ export default function EstructuraPresupuestoEditor({
       {/* Contenedor Principal - Layout Redimensionable */}
       <div ref={containerRef} className="flex flex-col flex-1 min-h-0 overflow-hidden">
         {/* Panel Superior - Tabla de Estructura */}
-        <div 
+        <div
           className="overflow-y-auto overflow-x-auto min-h-0 flex-shrink"
           style={{ height: `${100 - panelInferiorHeight}%` }}
         >
           <div className="py-1">
-            <table className="w-full table-fixed divide-y divide-[var(--border-color)] text-[11px]">
-          <thead className="sticky top-0 bg-[var(--card-bg)] z-10 table-header-shadow">
-            <tr>
-              <th className="w-[100px] px-2 py-1 text-center font-semibold text-[var(--text-secondary)] uppercase tracking-wider border-r border-[var(--border-color)]">
-                Item
-              </th>
-              <th className="w-auto px-2 py-1 text-left font-semibold text-[var(--text-secondary)] uppercase tracking-wider border-r border-[var(--border-color)]">
-                Descripción
-              </th>
-              <th className="w-[90px] px-2 py-1 text-center font-semibold text-[var(--text-secondary)] uppercase tracking-wider border-r border-[var(--border-color)]">
-                Und.
-              </th>
-              <th className="w-[110px] px-2 py-1 text-center font-semibold text-[var(--text-secondary)] uppercase tracking-wider border-r border-[var(--border-color)]">
-                Metrado
-              </th>
-              <th className="w-[130px] px-2 py-1 text-center font-semibold text-[var(--text-secondary)] uppercase tracking-wider border-r border-[var(--border-color)]">
-                P. Unitario
-              </th>
-              <th className="w-[150px] px-2 py-1 text-right font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
-                <div className="flex flex-col items-end leading-none">
-                  <span>Parcial</span>
-                  {estructuraData?.presupuesto?.parcial_presupuesto !== undefined && (
-                    <span className="text-[10px] text-purple-800 dark:text-purple-400 font-semibold mt-0">
-                      S/{estructuraData.presupuesto.parcial_presupuesto.toFixed(2)}
-                    </span>
-                  )}
-                </div>
-              </th>
-            </tr>
-          </thead>
-          <tbody className="bg-[var(--background)] divide-y divide-[var(--border-color)]">
-          {estructuraUnificada.map((item) => {
-            if (item.tipo === 'TITULO') {
-              const titulo = item.data;
-              const estaColapsado = titulosColapsados.has(titulo.id_titulo);
-              const tieneHijos = tieneHijosTitulo(titulo.id_titulo);
-              const tienePartidasEnTitulo = tienePartidas(titulo.id_titulo);
-              const partidasDelTitulo = getPartidasDeTitulo(titulo.id_titulo);
-              const esSeleccionado = itemSeleccionado === titulo.id_titulo;
-              const esCortado = itemCortado === titulo.id_titulo;
-              // Un título puede colapsarse si tiene hijos (títulos) O partidas
-              const puedeColapsar = tieneHijos || tienePartidasEnTitulo;
+            <table className="w-full table-fixed divide-y divide-[var(--border-color)] text-xs">
+              <thead className="sticky top-0 bg-[var(--card-bg)] z-10 table-header-shadow">
+                <tr>
+                  <th className="w-[100px] px-2 py-1 text-center font-semibold text-[var(--text-secondary)] uppercase tracking-wider border-r border-[var(--border-color)]">
+                    Item
+                  </th>
+                  <th className="w-auto px-2 py-1 text-left font-semibold text-[var(--text-secondary)] uppercase tracking-wider border-r border-[var(--border-color)]">
+                    Descripción
+                  </th>
+                  <th className="w-[90px] px-2 py-1 text-center font-semibold text-[var(--text-secondary)] uppercase tracking-wider border-r border-[var(--border-color)]">
+                    Und.
+                  </th>
+                  <th className="w-[110px] px-2 py-1 text-center font-semibold text-[var(--text-secondary)] uppercase tracking-wider border-r border-[var(--border-color)]">
+                    Metrado
+                  </th>
+                  <th className="w-[130px] px-2 py-1 text-center font-semibold text-[var(--text-secondary)] uppercase tracking-wider border-r border-[var(--border-color)]">
+                    P. Unitario
+                  </th>
+                  <th className="w-[150px] px-2 py-1 text-right font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
+                    <div className="flex flex-col items-end leading-none">
+                      <span>Parcial</span>
+                      {estructuraData?.presupuesto?.parcial_presupuesto !== undefined && (
+                        <span className="text-xs text-purple-800 dark:text-purple-400 font-semibold mt-0">
+                          S/{estructuraData.presupuesto.parcial_presupuesto.toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-[var(--background)] divide-y divide-[var(--border-color)]">
+                {estructuraUnificada.map((item) => {
+                  if (item.tipo === 'TITULO') {
+                    const titulo = item.data;
+                    const estaColapsado = titulosColapsados.has(titulo.id_titulo);
+                    const tieneHijos = tieneHijosTitulo(titulo.id_titulo);
+                    const tienePartidasEnTitulo = tienePartidas(titulo.id_titulo);
+                    const partidasDelTitulo = getPartidasDeTitulo(titulo.id_titulo);
+                    const esSeleccionado = itemSeleccionado === titulo.id_titulo;
+                    const esCortado = itemCortado === titulo.id_titulo;
+                    // Un título puede colapsarse si tiene hijos (títulos) O partidas
+                    const puedeColapsar = tieneHijos || tienePartidasEnTitulo;
 
-              // Si algún ancestro está colapsado, no mostrar
-              if (estaOcultoPorColapso(titulo)) {
-                return null;
-              }
+                    // Si algún ancestro está colapsado, no mostrar
+                    if (estaOcultoPorColapso(titulo)) {
+                      return null;
+                    }
 
-              return (
-                <React.Fragment key={titulo.id_titulo}>
-                  {/* Fila de Título */}
-                  <tr
-                    className={`
+                    return (
+                      <React.Fragment key={titulo.id_titulo}>
+                        {/* Fila de Título */}
+                        <tr
+                          className={`
                       ${esSeleccionado ? 'bg-blue-500/10' : 'bg-[var(--card-bg)]'}
                       ${esCortado ? 'opacity-50' : ''}
                       ${modo === 'edicion' ? (esSeleccionado ? 'hover:bg-blue-500/15 cursor-pointer' : 'hover:bg-[var(--card-bg)]/80 cursor-pointer') : 'cursor-default'}
                       transition-colors
                     `}
-                    onClick={() => handleSeleccionar(titulo.id_titulo)}
-                    onDoubleClick={() => modo === 'edicion' && handleEditarTitulo(titulo.id_titulo)}
-                  >
-                  {/* Item */}
-                  <td className={`px-2 py-1 text-right border-r border-[var(--border-color)] whitespace-nowrap ${getColorPorNivel(titulo.id_titulo, titulo.tipo)}`}>
-                    <span className="text-[10px] font-mono">{calcularNumeroItem(titulo, 'TITULO')}</span>
-                  </td>
-
-                    {/* Descripción */}
-                    <td className="px-2 py-1 border-r border-[var(--border-color)]">
-                      <div className="flex items-center gap-1.5">
-                        {puedeColapsar && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleToggleColapsoTitulo(titulo.id_titulo);
-                            }}
-                            className="flex-shrink-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                          >
-                            {estaColapsado ? (
-                              <ChevronRight className="h-3 w-3" />
-                            ) : (
-                              <ChevronDown className="h-3 w-3" />
-                            )}
-                          </button>
-                        )}
-                        {!puedeColapsar && <div className="w-3" />}
-                        <span 
-                          className={`font-medium ${getColorPorNivel(titulo.id_titulo, titulo.tipo)}`}
-                          style={{ paddingLeft: `${(calcularNivelDinamico(titulo.id_titulo) - 1) * 12}px` }}
+                          onClick={() => handleSeleccionar(titulo.id_titulo)}
+                          onDoubleClick={() => modo === 'edicion' && handleEditarTitulo(titulo.id_titulo)}
                         >
-                          {titulo.descripcion}
-                        </span>
-                      </div>
-                    </td>
+                          {/* Item */}
+                          <td className={`px-2 py-1 text-right border-r border-[var(--border-color)] whitespace-nowrap ${getColorPorNivel(titulo.id_titulo, titulo.tipo)}`}>
+                            <span className="text-xs font-mono">{calcularNumeroItem(titulo, 'TITULO')}</span>
+                          </td>
 
-                    {/* Und. */}
-                    <td className="px-2 py-1 text-center border-r border-[var(--border-color)] whitespace-nowrap">
-                      <span className="text-[10px] text-[var(--text-secondary)]">-</span>
-                    </td>
+                          {/* Descripción */}
+                          <td className="px-2 py-1 border-r border-[var(--border-color)]">
+                            <div className="flex items-center gap-1.5">
+                              {puedeColapsar && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleToggleColapsoTitulo(titulo.id_titulo);
+                                  }}
+                                  className="flex-shrink-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                                >
+                                  {estaColapsado ? (
+                                    <ChevronRight className="h-3 w-3" />
+                                  ) : (
+                                    <ChevronDown className="h-3 w-3" />
+                                  )}
+                                </button>
+                              )}
+                              {!puedeColapsar && <div className="w-3" />}
+                              <span
+                                className={`font-medium ${getColorPorNivel(titulo.id_titulo, titulo.tipo)}`}
+                                style={{ paddingLeft: `${(calcularNivelDinamico(titulo.id_titulo) - 1) * 12}px` }}
+                              >
+                                {titulo.descripcion}
+                              </span>
+                            </div>
+                          </td>
 
-                    {/* Metrado */}
-                    <td className="px-2 py-1 text-center border-r border-[var(--border-color)] whitespace-nowrap">
-                      <span className="text-[10px] text-[var(--text-secondary)]">-</span>
-                    </td>
+                          {/* Und. */}
+                          <td className="px-2 py-1 text-center border-r border-[var(--border-color)] whitespace-nowrap">
+                            <span className="text-xs text-[var(--text-secondary)]">-</span>
+                          </td>
 
-                    {/* Precio */}
-                    <td className="px-2 py-1 text-center border-r border-[var(--border-color)] whitespace-nowrap">
-                      <span className="text-[10px] text-[var(--text-secondary)]">-</span>
-                    </td>
+                          {/* Metrado */}
+                          <td className="px-2 py-1 text-center border-r border-[var(--border-color)] whitespace-nowrap">
+                            <span className="text-xs text-[var(--text-secondary)]">-</span>
+                          </td>
 
-                    {/* Parcial */}
-                    <td className={`px-2 py-1 text-right whitespace-nowrap ${getColorPorNivel(titulo.id_titulo, titulo.tipo)}`}>
-                      <span className="text-[11px]">S/ {titulo.total_parcial.toFixed(2)}</span>
-                    </td>
-                  </tr>
-                </React.Fragment>
-              );
-            } else {
-              // Es una partida principal (solo partidas principales, sin subpartidas)
-              const partida = item.data;
-              
-              // Solo mostrar partidas principales (sin id_partida_padre)
-              if (partida.id_partida_padre !== null) {
-                return null; // No mostrar subpartidas aquí
-              }
+                          {/* Precio */}
+                          <td className="px-2 py-1 text-center border-r border-[var(--border-color)] whitespace-nowrap">
+                            <span className="text-xs text-[var(--text-secondary)]">-</span>
+                          </td>
 
-              const esSeleccionadaPartida = itemSeleccionado === partida.id_partida;
-              const esCortadaPartida = itemCortado === partida.id_partida;
+                          {/* Parcial */}
+                          <td className={`px-2 py-1 text-right whitespace-nowrap ${getColorPorNivel(titulo.id_titulo, titulo.tipo)}`}>
+                            <span className="text-xs">S/ {titulo.total_parcial.toFixed(2)}</span>
+                          </td>
+                        </tr>
+                      </React.Fragment>
+                    );
+                  } else {
+                    // Es una partida principal (solo partidas principales, sin subpartidas)
+                    const partida = item.data;
 
-              // Si su título padre está colapsado, no mostrar
-              const tituloPadre = titulos.find(t => t.id_titulo === partida.id_titulo);
-              // Si algún ancestro del título padre está colapsado, no mostrar
-              if (estaOcultoPorColapso(partida)) {
-                return null;
-              }
+                    // Solo mostrar partidas principales (sin id_partida_padre)
+                    if (partida.id_partida_padre !== null) {
+                      return null; // No mostrar subpartidas aquí
+                    }
 
-              return (
-                <tr
-                  key={partida.id_partida}
-                  className={`
+                    const esSeleccionadaPartida = itemSeleccionado === partida.id_partida;
+                    const esCortadaPartida = itemCortado === partida.id_partida;
+
+                    // Si su título padre está colapsado, no mostrar
+                    const tituloPadre = titulos.find(t => t.id_titulo === partida.id_titulo);
+                    // Si algún ancestro del título padre está colapsado, no mostrar
+                    if (estaOcultoPorColapso(partida)) {
+                      return null;
+                    }
+
+                    return (
+                      <tr
+                        key={partida.id_partida}
+                        className={`
                     ${esSeleccionadaPartida ? 'bg-green-500/10' : 'bg-[var(--background)]'}
                     ${esCortadaPartida ? 'opacity-50' : ''}
                     ${modo === 'edicion' ? (esSeleccionadaPartida ? 'hover:bg-green-500/15 cursor-pointer' : 'hover:bg-[var(--background)]/80 cursor-pointer') : 'cursor-default'}
                     transition-colors
                   `}
-                  onClick={() => handleSeleccionar(partida.id_partida)}
-                  onDoubleClick={() => modo === 'edicion' && handleEditarPartida(partida.id_partida)}
-                >
-                  {/* Item */}
-                  <td className="px-2 py-1 text-right border-r border-[var(--border-color)] whitespace-nowrap">
-                    <span className="text-[10px] font-mono text-[var(--text-secondary)]">{calcularNumeroItem(partida, 'PARTIDA')}</span>
-                  </td>
-
-                  {/* Descripción */}
-                  <td className="px-2 py-1 border-r border-[var(--border-color)]">
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-3" />
-                      <span 
-                        className="text-[var(--text-primary)]"
-                        style={{ 
-                          paddingLeft: `${(calcularNivelDinamico(partida.id_titulo) + (partida.nivel_partida - 1)) * 12}px` 
-                        }}
+                        onClick={() => handleSeleccionar(partida.id_partida)}
+                        onDoubleClick={() => modo === 'edicion' && handleEditarPartida(partida.id_partida)}
                       >
-                        {partida.descripcion}
-                      </span>
-                    </div>
-                  </td>
+                        {/* Item */}
+                        <td className="px-2 py-1 text-right border-r border-[var(--border-color)] whitespace-nowrap">
+                          <span className="text-xs font-mono text-[var(--text-secondary)]">{calcularNumeroItem(partida, 'PARTIDA')}</span>
+                        </td>
 
-                  {/* Und. */}
-                  <td className="px-2 py-1 text-center border-r border-[var(--border-color)] whitespace-nowrap">
-                    <span className="text-[10px] text-[var(--text-secondary)]">{partida.unidad_medida}</span>
-                  </td>
+                        {/* Descripción */}
+                        <td className="px-2 py-1 border-r border-[var(--border-color)]">
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-3" />
+                            <span
+                              className="text-[var(--text-primary)]"
+                              style={{
+                                paddingLeft: `${(calcularNivelDinamico(partida.id_titulo) + (partida.nivel_partida - 1)) * 12}px`
+                              }}
+                            >
+                              {partida.descripcion}
+                            </span>
+                          </div>
+                        </td>
 
-                  {/* Metrado */}
-                  <td className="px-2 py-1 text-center border-r border-[var(--border-color)] whitespace-nowrap">
-                    <span className="text-[10px] text-[var(--text-secondary)]">{partida.metrado.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                  </td>
+                        {/* Und. */}
+                        <td className="px-2 py-1 text-center border-r border-[var(--border-color)] whitespace-nowrap">
+                          <span className="text-xs text-[var(--text-secondary)]">{partida.unidad_medida}</span>
+                        </td>
 
-                  {/* Precio */}
-                  <td className="px-2 py-1 text-center border-r border-[var(--border-color)] whitespace-nowrap">
-                    <span className="text-[10px] text-[var(--text-secondary)]">S/ {partida.precio_unitario.toFixed(2)}</span>
-                  </td>
+                        {/* Metrado */}
+                        <td className="px-2 py-1 text-center border-r border-[var(--border-color)] whitespace-nowrap">
+                          <span className="text-xs text-[var(--text-secondary)]">{partida.metrado.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        </td>
 
-                  {/* Parcial */}
-                  <td className="px-2 py-1 text-right whitespace-nowrap">
-                    <span className="text-[11px] text-[var(--text-primary)]">S/ {partida.parcial_partida.toFixed(2)}</span>
-                  </td>
-                </tr>
-              );
-            }
-          })}
-          </tbody>
-          </table>
-          {/* Estado vacío */}
-          {estructuraUnificada.length === 0 && (
-            <div className="text-center py-8">
-              <p className="text-[10px] text-[var(--text-secondary)]">
-                No hay títulos o partidas aún. Agrega el primero usando el botón "Título".
-              </p>
-            </div>
-          )}
+                        {/* Precio */}
+                        <td className="px-2 py-1 text-center border-r border-[var(--border-color)] whitespace-nowrap">
+                          <span className="text-xs text-[var(--text-secondary)]">S/ {partida.precio_unitario.toFixed(2)}</span>
+                        </td>
+
+                        {/* Parcial */}
+                        <td className="px-2 py-1 text-right whitespace-nowrap">
+                          <span className="text-xs text-[var(--text-primary)]">S/ {partida.parcial_partida.toFixed(2)}</span>
+                        </td>
+                      </tr>
+                    );
+                  }
+                })}
+              </tbody>
+            </table>
+            {/* Estado vacío */}
+            {estructuraUnificada.length === 0 && (
+              <div className="text-center py-8">
+                <p className="text-xs text-[var(--text-secondary)]">
+                  No hay títulos o partidas aún. Agrega el primero usando el botón "Título".
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -2536,7 +2543,7 @@ export default function EstructuraPresupuestoEditor({
         </div>
 
         {/* Panel Inferior - Detalle de Partida */}
-        <div 
+        <div
           className="flex-shrink-0 min-h-0 overflow-hidden"
           style={{ height: `${panelInferiorHeight}%` }}
         >
@@ -2668,12 +2675,12 @@ export default function EstructuraPresupuestoEditor({
           setPartidas(prev => prev.map(p =>
             p.id_partida === idSubPartida
               ? {
-                  ...p,
-                  descripcion: subPartida.descripcion,
-                  unidad_medida: subPartida.unidad_medida,
-                  precio_unitario: nuevoPrecioUnitario, // Usar el recalculado
-                  parcial_partida: subPartida.parcial_partida,
-                }
+                ...p,
+                descripcion: subPartida.descripcion,
+                unidad_medida: subPartida.unidad_medida,
+                precio_unitario: nuevoPrecioUnitario, // Usar el recalculado
+                parcial_partida: subPartida.parcial_partida,
+              }
               : p
           ));
 
@@ -2688,4 +2695,5 @@ export default function EstructuraPresupuestoEditor({
     </div>
   );
 }
+
 

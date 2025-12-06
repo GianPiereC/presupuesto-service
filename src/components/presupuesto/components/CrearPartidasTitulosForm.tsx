@@ -39,7 +39,7 @@ export default function CrearPartidasTitulosForm({
   const [localNombre, setLocalNombre] = useState(nombre);
   const [localIdEspecialidad, setLocalIdEspecialidad] = useState<string | null>(id_especialidadProp || null);
   const { data: especialidades, isLoading: isLoadingEspecialidades } = useEspecialidades();
-  
+
   // Optimizar las opciones de especialidad con useMemo
   const especialidadOptions = useMemo(() => {
     if (!especialidades) return [];
@@ -49,7 +49,7 @@ export default function CrearPartidasTitulosForm({
       description: esp.descripcion,
     }));
   }, [especialidades]);
-  
+
   const [localPartidaData, setLocalPartidaData] = useState<PartidaData>({
     unidad_medida: partidaData?.unidad_medida || 'und',
     metrado: partidaData?.metrado || 0,
@@ -86,7 +86,7 @@ export default function CrearPartidasTitulosForm({
       } else {
         const numValor = typeof valor === 'string' ? parseFloat(valor) || 0 : valor;
         nuevo[campo] = numValor;
-        
+
         // Recalcular parcial_partida cuando cambia metrado o precio_unitario
         if (campo === 'metrado' || campo === 'precio_unitario') {
           nuevo.parcial_partida = nuevo.metrado * nuevo.precio_unitario;
@@ -121,7 +121,7 @@ export default function CrearPartidasTitulosForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
-        <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">
+        <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1.5">
           {tipo === 'PARTIDA' ? 'Descripción' : 'Nombre'}
         </label>
         <Input
@@ -137,7 +137,7 @@ export default function CrearPartidasTitulosForm({
 
       {tipo === 'TITULO' && (
         <div>
-          <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">
+          <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1.5">
             Especialidad (Opcional)
           </label>
           <SearchSelect
@@ -158,7 +158,7 @@ export default function CrearPartidasTitulosForm({
         <>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">
+              <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1.5">
                 Unidad de Medida
               </label>
               <Input
@@ -170,7 +170,7 @@ export default function CrearPartidasTitulosForm({
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">
+              <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1.5">
                 Metrado
               </label>
               <Input

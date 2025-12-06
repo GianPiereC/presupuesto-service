@@ -210,7 +210,7 @@ export default function PresupuestoCard({ presupuestos, grupo, id_proyecto }: Pr
       <div className="flex items-start justify-between mb-4">
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-2">
-            <h3 className="text-sm font-semibold text-(--text-primary)">
+            <h3 className="text-sm font-semibold text-[var(--text-primary)]">
               {presupuestoPrincipal.nombre_presupuesto}
             </h3>
             <span
@@ -222,7 +222,7 @@ export default function PresupuestoCard({ presupuestos, grupo, id_proyecto }: Pr
             </span>
           </div>
           
-          <div className="flex items-center gap-4 text-xs text-(--text-secondary)">
+          <div className="flex items-center gap-4 text-xs text-[var(--text-secondary)]">
             <div className="flex items-center gap-1">
               <Calendar className="h-3 w-3" />
               <span>
@@ -258,7 +258,7 @@ export default function PresupuestoCard({ presupuestos, grupo, id_proyecto }: Pr
           {padre && (
             <button
               onClick={() => setIsEditPadreModalOpen(true)}
-              className="h-5 w-5 p-0 flex-shrink-0 opacity-50 hover:opacity-100 transition-opacity text-(--text-secondary) hover:text-(--text-primary)"
+              className="h-5 w-5 p-0 flex-shrink-0 opacity-50 hover:opacity-100 transition-opacity text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
               title="Configurar presupuesto"
             >
               <Settings className="h-3.5 w-3.5" />
@@ -271,7 +271,7 @@ export default function PresupuestoCard({ presupuestos, grupo, id_proyecto }: Pr
       <div className="pt-3">
         {!tieneVersiones ? (
           <div className="text-center py-6">
-            <p className="text-sm text-(--text-secondary)">
+            <p className="text-sm text-[var(--text-secondary)]">
               Cargando versión inicial...
             </p>
           </div>
@@ -289,8 +289,8 @@ export default function PresupuestoCard({ presupuestos, grupo, id_proyecto }: Pr
                 <div key={fase} className="rounded-md overflow-hidden card-shadow">
                   {/* Header de la fase */}
                   <div
-                    className={`px-3 py-2 bg-(--card-bg) flex items-center justify-between ${
-                      esActual ? '' : 'cursor-default hover:bg-(--hover-bg)'
+                    className={`px-3 py-2 bg-[var(--card-bg)] flex items-center justify-between ${
+                      esActual ? '' : 'cursor-default hover:bg-[var(--hover-bg)]'
                     }`}
                     onClick={() => !esActual && toggleFase(fase)}
                   >
@@ -302,13 +302,13 @@ export default function PresupuestoCard({ presupuestos, grupo, id_proyecto }: Pr
                       >
                         {faseLabels[fase]}
                       </span>
-                      <span className="text-xs text-(--text-secondary)">
+                      <span className="text-xs text-[var(--text-secondary)]">
                         {versionesFase.length} versión{versionesFase.length !== 1 ? 'es' : ''}
                       </span>
                     </div>
                     {!esActual && (
                       <button
-                        className="text-(--text-secondary) hover:text-(--text-primary) transition-colors"
+                        className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
                         onClick={(e) => {
                           e.stopPropagation();
                           toggleFase(fase);
@@ -332,7 +332,7 @@ export default function PresupuestoCard({ presupuestos, grupo, id_proyecto }: Pr
                         return (
                           <div
                             key={presupuesto.id_presupuesto}
-                            className="px-4 py-2.5 rounded-lg bg-(--background) card-shadow hover:bg-(--card-bg)/50 transition-all"
+                            className="px-4 py-2.5 rounded-lg bg-[var(--background)] card-shadow hover:bg-[var(--card-bg)]/50 transition-all"
                           >
                             <div className="flex items-center gap-4">
                               {/* Lado izquierdo: Título */}
@@ -351,10 +351,10 @@ export default function PresupuestoCard({ presupuestos, grupo, id_proyecto }: Pr
                               </div>
 
                               {/* Centro: Información horizontal - mejor distribuida */}
-                              <div className="flex items-center gap-4 text-xs text-(--text-secondary) flex-1 min-w-0">
+                              <div className="flex items-center gap-4 text-xs text-[var(--text-secondary)] flex-1 min-w-0">
                                 <div className="flex items-center gap-1 whitespace-nowrap">
-                                  <span className="text-(--text-secondary)">Fecha:</span>
-                                  <span className="text-(--text-primary)">
+                                  <span className="text-[var(--text-secondary)]">Fecha:</span>
+                                  <span className="text-[var(--text-primary)]">
                                     {new Date(presupuesto.fecha_creacion).toLocaleDateString('es-ES', {
                                       day: '2-digit',
                                       month: '2-digit',
@@ -364,15 +364,15 @@ export default function PresupuestoCard({ presupuestos, grupo, id_proyecto }: Pr
                                 </div>
 
                                 <div className="flex items-center gap-1 whitespace-nowrap">
-                                  <span className="text-(--text-secondary)">Monto:</span>
-                                  <span className="font-semibold text-(--text-primary)">
+                                  <span className="text-[var(--text-secondary)]">Monto:</span>
+                                  <span className="font-semibold text-[var(--text-primary)]">
                                     S/ {(presupuesto.total_presupuesto ?? presupuesto.parcial_presupuesto ?? 0).toLocaleString('es-PE', { minimumFractionDigits: 2 })}
                                   </span>
                                 </div>
 
                                 {/* Descripción de versión (si existe) */}
                                 {presupuesto.descripcion_version && (
-                                  <div className="flex items-center gap-1.5 text-(--text-secondary) min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5 text-[var(--text-secondary)] min-w-0 flex-1">
                                     <FileText className="h-3.5 w-3.5 flex-shrink-0 opacity-60" />
                                     <span className="truncate">{presupuesto.descripcion_version}</span>
                                   </div>

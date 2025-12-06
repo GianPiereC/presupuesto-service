@@ -36,10 +36,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      // Verificar si hay token y datos de usuario
-      const token = localStorage.getItem('auth_token');
+      // Verificar si hay token en cookies y datos de usuario en localStorage
+      const { getAuthToken } = await import('@/lib/cookies');
+      const token = getAuthToken();
       const userData = localStorage.getItem('user');
-      
+
       if (token && userData) {
         try {
           const parsedUser = JSON.parse(userData);
@@ -84,7 +85,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setMounted(true);
     checkAuth();
-  }, [checkAuth]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const value: AuthContextType = {
     user,
