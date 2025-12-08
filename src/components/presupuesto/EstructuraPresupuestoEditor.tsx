@@ -114,6 +114,7 @@ export default function EstructuraPresupuestoEditor({
   const [titulosEliminados, setTitulosEliminados] = useState<Set<string>>(new Set());
   const [partidasEliminadas, setPartidasEliminadas] = useState<Set<string>>(new Set());
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingRecursos, setIsSavingRecursos] = useState(false);
 
   // Estado para subpartidas que necesitan creación de APU
   const [subpartidasParaCrearApu, setSubpartidasParaCrearApu] = useState<Map<string, PartidaLocal>>(new Map());
@@ -2164,18 +2165,18 @@ export default function EstructuraPresupuestoEditor({
               size="sm"
               variant={hayCambiosPendientes ? "default" : "outline"}
               onClick={handleGuardarCambios}
-              disabled={(!hayCambiosPendientes && !isSaving) || isSaving || createTitulo.isPending || updateTitulo.isPending || createPartida.isPending || updatePartida.isPending || deleteTitulo.isPending || deletePartida.isPending}
+              disabled={(!hayCambiosPendientes && !isSaving && !isSavingRecursos) || isSaving || isSavingRecursos || createTitulo.isPending || updateTitulo.isPending || createPartida.isPending || updatePartida.isPending || deleteTitulo.isPending || deletePartida.isPending}
               className={`flex items-center gap-1.5 h-6 px-2 text-xs ${hayCambiosPendientes ? 'bg-blue-600 hover:bg-blue-700 text-white' : ''
                 }`}
               title={hayCambiosPendientes ? 'Guardar cambios pendientes' : 'No hay cambios para guardar'}
             >
-              {isSaving ? (
+              {(isSaving || isSavingRecursos) ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
               ) : (
                 <Save className="h-3 w-3" />
               )}
-              {isSaving ? 'Guardando...' : (hayCambiosPendientes ? 'Guardar cambios' : 'Sin cambios')}
-              {hayCambiosPendientes && !isSaving && (
+              {(isSaving || isSavingRecursos) ? 'Guardando...' : (hayCambiosPendientes ? 'Guardar cambios' : 'Sin cambios')}
+              {hayCambiosPendientes && !isSaving && !isSavingRecursos && (
                 <span className="ml-1 w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
               )}
             </Button>
@@ -2586,6 +2587,9 @@ export default function EstructuraPresupuestoEditor({
                 newMap.delete(idPartidaSubpartida);
                 return newMap;
               });
+            }}
+            onGuardandoCambios={(isGuardando) => {
+              setIsSavingRecursos(isGuardando);
             }}
             modo={modo as 'edicion' | 'lectura' | 'meta' | 'licitacion' | 'contractual'}
           />

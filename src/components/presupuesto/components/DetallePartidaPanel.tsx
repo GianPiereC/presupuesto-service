@@ -118,6 +118,7 @@ interface DetallePartidaPanelProps {
   onAgregarInsumo?: () => void;
   onAgregarSubPartida?: () => void;
   onGuardarCambios?: () => void;
+  onGuardandoCambios?: (isGuardando: boolean) => void;
   modo?: 'edicion' | 'lectura' | 'meta' | 'licitacion' | 'contractual';
   onEditarSubPartida?: (idPartidaSubpartida: string, recursos: RecursoAPUEditable[], idPartidaOriginal?: string, rendimiento?: number, jornada?: number, descripcion?: string) => void;
   onActualizarSubPartida?: (idSubPartida: string, subPartida: PartidaLocal) => void;
@@ -136,6 +137,7 @@ export default function DetallePartidaPanel({
   onAgregarInsumo,
   onAgregarSubPartida,
   onGuardarCambios,
+  onGuardandoCambios,
   modo = 'edicion',
   onEditarSubPartida,
   onActualizarSubPartida,
@@ -167,6 +169,7 @@ export default function DetallePartidaPanel({
   const [rendimientoInput, setRendimientoInput] = useState<string>('1.0');
   const [jornadaInput, setJornadaInput] = useState<string>('8');
   const [hasChanges, setHasChanges] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Estados para editar metrado y unidad de medida de la partida
   const [metradoInput, setMetradoInput] = useState<string>('0');
@@ -1074,6 +1077,10 @@ export default function DetallePartidaPanel({
       return;
     }
 
+    if (isSaving) {
+      return; // Ya se está guardando, evitar múltiples llamadas
+    }
+
     const errores: {
       sinSeleccionar: string[];
       sinCantidad: string[];
@@ -1152,6 +1159,10 @@ export default function DetallePartidaPanel({
     const apuExiste = apuDataActualizado || apuData;
 
     try {
+      setIsSaving(true);
+      if (onGuardandoCambios) {
+        onGuardandoCambios(true);
+      }
       const recursosInput: RecursoApuInput[] = recursosEditables
         .filter(r => (r.recurso_id && r.descripcion) || r.esSubpartida)
         .map((r, index) => {
@@ -1858,6 +1869,11 @@ export default function DetallePartidaPanel({
     } catch (error: any) {
       console.error('Error al guardar APU:', error);
       toast.error(error?.message || 'Error al guardar el APU');
+    } finally {
+      setIsSaving(false);
+      if (onGuardandoCambios) {
+        onGuardandoCambios(false);
+      }
     }
   };
 
@@ -1917,7 +1933,7 @@ export default function DetallePartidaPanel({
 
   const isLoading = isLoadingApu || createApu.isPending || updateApu.isPending ||
     addRecursoToApu.isPending || updateRecursoInApu.isPending ||
-    removeRecursoFromApu.isPending;
+    removeRecursoFromApu.isPending || isSaving;
 
   return (
     <div className="h-full flex flex-col bg-[var(--background)] border-t border-[var(--border-color)]">
@@ -2240,8 +2256,8 @@ export default function DetallePartidaPanel({
                   </th>
                   <th className="px-1 py-1 text-center font-medium text-[var(--text-secondary)] uppercase w-[8%]">Und.</th>
                   <th className="px-1 py-1 text-center font-medium text-[var(--text-secondary)] uppercase w-[8%]">Cuad.</th>
-                  <th className="px-1 py-1 text-right font-medium text-[var(--text-secondary)] uppercase w-[12%]">Cantidad</th>
-                  <th className="px-1 py-1 text-right font-medium text-[var(--text-secondary)] uppercase w-[12%]">P.U.</th>
+                  <th className="px-1 py-1 text-center font-medium text-[var(--text-secondary)] uppercase w-[12%]">Cantidad</th>
+                  <th className="px-1 py-1 text-center font-medium text-[var(--text-secondary)] uppercase w-[12%]">P.U.</th>
                   <th className="px-1 py-1 text-right font-medium text-[var(--text-secondary)] uppercase w-[15%]">Parcial</th>
                   <th className="px-1 py-1 text-center font-medium text-[var(--text-secondary)] uppercase w-[10%]"></th>
                 </tr>
@@ -2295,16 +2311,7 @@ export default function DetallePartidaPanel({
                         )}
                       </td>
                       <td className="px-1 py-1 text-center">
-                        {modoReal === 'edicion' ? (
-                          <Input
-                            type="text"
-                            value={recurso.unidad_medida || ''}
-                            onChange={(e) => handleUpdateRecurso(recurso.id_recurso_apu, 'unidad_medida', e.target.value)}
-                            className="text-xs h-6 w-full text-center px-1"
-                          />
-                        ) : (
-                          <span className="text-xs text-[var(--text-primary)]">{recurso.unidad_medida || '—'}</span>
-                        )}
+                        <span className="text-xs text-[var(--text-primary)]">{recurso.unidad_medida || '—'}</span>
                       </td>
                       <td className="px-1 py-1 text-center">
                         {/* No mostrar cuadrilla para subpartidas */}
@@ -2345,12 +2352,12 @@ export default function DetallePartidaPanel({
                           );
                         })()}
                       </td>
-                      <td className="px-1 py-1 text-right">
+                      <td className="px-1 py-1 text-center">
                         {modoReal === 'edicion' ? (
                           (() => {
                             const esEquipoPorcentajeMo = recurso.tipo_recurso === 'EQUIPO' && (recurso.unidad_medida === '%mo' || recurso.unidad_medida?.toLowerCase() === '%mo');
                             return (
-                              <div className="relative inline-flex items-center justify-end w-full">
+                              <div className="relative inline-flex items-center justify-center w-full">
                                 <Input
                                   type="number"
                                   step="0.0001"
@@ -2367,7 +2374,7 @@ export default function DetallePartidaPanel({
                                       handleUpdateRecurso(recurso.id_recurso_apu, 'cantidad', numValue);
                                     }
                                   }}
-                                  className={`text-xs h-6 w-full text-right ${esEquipoPorcentajeMo ? 'pr-4' : 'px-1'}`}
+                                  className={`text-xs h-6 w-full text-center ${esEquipoPorcentajeMo ? 'pr-4' : 'px-1'}`}
                                 />
                                 {esEquipoPorcentajeMo && (
                                   <span className="absolute right-2 text-xs text-[var(--text-secondary)] pointer-events-none">%</span>
@@ -2384,7 +2391,7 @@ export default function DetallePartidaPanel({
                           </span>
                         )}
                       </td>
-                      <td className="px-1 py-1 text-right">
+                      <td className="px-1 py-1 text-center">
                         {(() => {
                           const esEquipoPorcentajeMo = recurso.tipo_recurso === 'EQUIPO' && (recurso.unidad_medida === '%mo' || recurso.unidad_medida?.toLowerCase() === '%mo');
 
@@ -2401,7 +2408,7 @@ export default function DetallePartidaPanel({
                           }
 
                           return modoReal === 'edicion' ? (
-                            <div className="flex items-center gap-1 justify-end">
+                            <div className="flex items-center gap-1 justify-center">
                               <Input
                                 type="number"
                                 step="0.0001"
@@ -2467,7 +2474,7 @@ export default function DetallePartidaPanel({
                                     }
                                   }
                                 }}
-                                className="text-xs h-6 w-20 text-right px-1"
+                                className="text-xs h-6 w-20 text-center px-1"
                                 title="Precio unitario (máximo 2 decimales)"
                               />
                               <label className="flex items-center gap-1 cursor-pointer group" title="Precio único (no afecta precio compartido)">
@@ -2494,7 +2501,7 @@ export default function DetallePartidaPanel({
                               </label>
                             </div>
                           ) : (
-                            <div className="flex items-center gap-1 justify-end">
+                            <div className="flex items-center gap-1 justify-center">
                               <span className="text-xs text-[var(--text-primary)]">
                                 {recurso.esSubpartida
                                   ? `S/ ${recurso.precio_unitario_subpartida !== undefined && recurso.precio_unitario_subpartida !== null ? recurso.precio_unitario_subpartida.toFixed(2) : '—'}`
@@ -2608,7 +2615,7 @@ export default function DetallePartidaPanel({
               ) : (
                 <Save className="h-3 w-3" />
               )}
-              Guardar Cambios APU
+              {isSaving ? 'Guardando...' : 'Guardar Cambios APU'}
             </button>
           </div>
         </div>
