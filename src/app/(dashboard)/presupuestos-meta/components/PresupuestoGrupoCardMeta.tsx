@@ -102,6 +102,12 @@ export default function PresupuestoGrupoCardMeta({
   const totalAprobadas = versionesAprobadas.length;
   const totalPorAprobar = versionesPorAprobar.length;
 
+  // Verificar si hay una versión vigente (oficializada) - si hay, no mostrar botón "Nueva Versión"
+  // Solo ocultar si hay una versión vigente, no por versiones aprobadas
+  const tieneVersionVigente = useMemo(() => {
+    return versiones.some(v => v.fase === 'META' && v.estado === 'vigente');
+  }, [versiones]);
+
   // Verificar si hay alguna versión en revisión en el grupo
   const hayVersionEnRevision = useMemo(() => {
     return versiones.some(v => v.fase === 'META' && v.estado === 'en_revision');
@@ -341,15 +347,18 @@ export default function PresupuestoGrupoCardMeta({
 
           {/* Botones de acción del grupo */}
           <div className="flex items-center gap-2 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-            <button
-              onClick={handleCrearVersion}
-              disabled={createVersion.isPending}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 shadow-sm hover:shadow transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-              title="Crear nueva versión"
-            >
-              <Copy className="h-4 w-4" />
-              Nueva Versión
-            </button>
+            {/* Ocultar botón "Nueva Versión" solo si hay una versión vigente (oficializada) */}
+            {!tieneVersionVigente && (
+              <button
+                onClick={handleCrearVersion}
+                disabled={createVersion.isPending}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 shadow-sm hover:shadow transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Crear nueva versión"
+              >
+                <Copy className="h-4 w-4" />
+                Nueva Versión
+              </button>
+            )}
             <button
               className="p-1.5 rounded-lg bg-[var(--background)]/50 hover:bg-[var(--background)]/70 text-[var(--text-secondary)] hover:text-[var(--text-primary)] shadow-sm hover:shadow transition-all duration-200"
               onClick={(e) => {

@@ -165,10 +165,13 @@ export default function ProyectosPage() {
             Gestión de todos los proyectos
           </p>
         </div>
-        <Button onClick={handleOpenModal} className="flex items-center gap-2">
+        <button
+          onClick={handleOpenModal}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-xs text-blue-600 dark:text-blue-400 shadow-sm hover:shadow transition-all duration-200"
+        >
           <Plus className="h-4 w-4" />
           Nuevo Proyecto
-        </Button>
+        </button>
       </div>
 
       {/* Barra de búsqueda y filtros */}
@@ -182,7 +185,7 @@ export default function ProyectosPage() {
               placeholder="Buscar por nombre, cliente, empresa o ID..."
               value={searchQuery}
               onChange={handleSearchChange}
-              className="pl-10"
+              className="pl-10 text-xs"
             />
           </div>
 
@@ -191,7 +194,7 @@ export default function ProyectosPage() {
             <select
               value={estadoFilter}
               onChange={handleEstadoFilterChange}
-              className="flex h-10 w-full md:w-[150px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="flex h-10 w-full md:w-[150px] rounded-md border border-[var(--border-color)] bg-[var(--background)] px-3 py-2 text-xs text-[var(--text-primary)] ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--border-color)] focus-visible:ring-offset-2"
             >
               <option value="">Todos los estados</option>
               <option value="ACTIVO">Activo</option>
@@ -201,15 +204,13 @@ export default function ProyectosPage() {
             </select>
 
             {(searchQuery || estadoFilter) && (
-              <Button
-                variant="outline"
-                size="sm"
+              <button
                 onClick={clearFilters}
-                className="flex items-center gap-1"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[var(--background)]/50 hover:bg-[var(--background)]/70 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] shadow-sm hover:shadow transition-all duration-200"
               >
                 <X className="h-4 w-4" />
                 Limpiar
-              </Button>
+              </button>
             )}
           </div>
         </div>
@@ -265,19 +266,19 @@ export default function ProyectosPage() {
         size="lg"
         footer={
           <div className="flex justify-end gap-3">
-            <Button
+            <button
               type="button"
-              variant="outline"
               onClick={handleCloseModal}
               disabled={createProyecto.isPending || updateProyecto.isPending}
+              className="px-4 py-2 rounded-lg bg-[var(--background)]/50 hover:bg-[var(--background)]/70 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] shadow-sm hover:shadow transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Cancelar
-            </Button>
-            <Button
+            </button>
+            <button
               type="submit"
               form="proyecto-form"
-              variant="default"
               disabled={createProyecto.isPending || updateProyecto.isPending}
+              className="px-4 py-2 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-xs text-blue-600 dark:text-blue-400 shadow-sm hover:shadow transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {createProyecto.isPending || updateProyecto.isPending
                 ? selectedProyecto
@@ -286,7 +287,7 @@ export default function ProyectosPage() {
                 : selectedProyecto
                 ? 'Actualizar'
                 : 'Crear'}
-            </Button>
+            </button>
           </div>
         }
       >
@@ -345,20 +346,25 @@ export default function ProyectosPage() {
               </div>
             </div>
             <div className="flex justify-end gap-3 pt-4 border-t border-[var(--border-color)]/15">
-              <Button variant="outline" onClick={handleCloseDetailModal}>
+              <button
+                onClick={handleCloseDetailModal}
+                className="px-4 py-2 rounded-lg bg-[var(--background)]/50 hover:bg-[var(--background)]/70 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] shadow-sm hover:shadow transition-all duration-200"
+              >
                 Cerrar
-              </Button>
-              <Button
-                variant="outline"
+              </button>
+              <button
                 onClick={handleDelete}
                 disabled={deleteProyecto.isPending}
-                className="text-red-600 hover:text-red-700"
+                className="px-4 py-2 rounded-lg bg-[var(--background)]/50 hover:bg-[var(--background)]/70 text-xs text-red-600 hover:text-red-700 shadow-sm hover:shadow transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {deleteProyecto.isPending ? 'Eliminando...' : 'Eliminar'}
-              </Button>
-              <Button variant="default" onClick={handleEditClick}>
+              </button>
+              <button
+                onClick={handleEditClick}
+                className="px-4 py-2 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-xs text-blue-600 dark:text-blue-400 shadow-sm hover:shadow transition-all duration-200"
+              >
                 Editar
-              </Button>
+              </button>
             </div>
           </div>
         )}

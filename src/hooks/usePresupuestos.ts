@@ -4,6 +4,7 @@ import { GET_PRESUPUESTOS_BY_PROYECTO_QUERY, GET_PRESUPUESTO_QUERY, GET_ESTRUCTU
 import { ADD_PRESUPUESTO_MUTATION, UPDATE_PRESUPUESTO_MUTATION, DELETE_PRESUPUESTO_MUTATION, CREAR_PRESUPUESTO_PADRE_MUTATION, CREAR_VERSION_DESDE_PADRE_MUTATION, CREAR_VERSION_DESDE_VERSION_MUTATION, ENVIAR_A_LICITACION_MUTATION, PASAR_A_CONTRACTUAL_MUTATION, CREAR_PRESUPUESTO_META_DESDE_CONTRACTUAL_MUTATION, ACTUALIZAR_PRESUPUESTO_PADRE_MUTATION, ELIMINAR_GRUPO_PRESUPUESTO_COMPLETO_MUTATION, ENVIAR_VERSION_META_A_APROBACION_MUTATION, ENVIAR_VERSION_META_A_OFICIALIZACION_MUTATION } from '@/graphql/mutations/presupuesto.mutations';
 import { useAuth } from '@/context/auth-context';
 import toast from 'react-hot-toast';
+import { showCloningToast, dismissCloningToast } from '@/utils/cloning-toast';
 import type { APUCalculo } from '@/utils/calculoEstructura';
 import {
   calcularCostoDirectoAPU,
@@ -618,7 +619,17 @@ export function useCreateVersionDesdeVersion() {
       );
       return response.crearVersionDesdeVersion;
     },
-    onSuccess: (data) => {
+    onMutate: async () => {
+      // Mostrar el toast inmediatamente
+      const toastId = showCloningToast();
+      // Pequeño delay para asegurar que el toast se renderice
+      await new Promise(resolve => setTimeout(resolve, 100));
+      return { cloningToastId: toastId };
+    },
+    onSuccess: (data, variables, context) => {
+      if (context?.cloningToastId) {
+        dismissCloningToast(context.cloningToastId);
+      }
       queryClient.invalidateQueries({ queryKey: ['presupuestos', 'proyecto', data.id_proyecto] });
       queryClient.invalidateQueries({ queryKey: ['presupuestos', 'fase'] });
       // Invalidar también la query específica de la fase del presupuesto creado
@@ -629,7 +640,10 @@ export function useCreateVersionDesdeVersion() {
       queryClient.invalidateQueries({ queryKey: ['estructura', data.id_presupuesto] });
       toast.success('Nueva versión creada exitosamente con toda la estructura');
     },
-    onError: (error: any) => {
+    onError: (error: any, variables, context) => {
+      if (context?.cloningToastId) {
+        dismissCloningToast(context.cloningToastId);
+      }
       toast.error(error?.message || 'Error al crear la nueva versión');
     },
   });
@@ -726,14 +740,27 @@ export function useCrearPresupuestoMetaDesdeContractual() {
       );
       return response.crearPresupuestoMetaDesdeContractual;
     },
-    onSuccess: (data) => {
+    onMutate: async () => {
+      // Mostrar el toast inmediatamente
+      const toastId = showCloningToast();
+      // Pequeño delay para asegurar que el toast se renderice
+      await new Promise(resolve => setTimeout(resolve, 100));
+      return { cloningToastId: toastId };
+    },
+    onSuccess: (data, variables, context) => {
+      if (context?.cloningToastId) {
+        dismissCloningToast(context.cloningToastId);
+      }
       queryClient.invalidateQueries({ queryKey: ['presupuestos', 'fase', 'CONTRACTUAL'] });
       queryClient.invalidateQueries({ queryKey: ['presupuestos', 'fase', 'META'] });
       queryClient.invalidateQueries({ queryKey: ['presupuestos', 'proyecto', data.id_proyecto] });
       queryClient.invalidateQueries({ queryKey: ['presupuestos'] });
       toast.success('Presupuesto Meta creado exitosamente');
     },
-    onError: (error: any) => {
+    onError: (error: any, variables, context) => {
+      if (context?.cloningToastId) {
+        dismissCloningToast(context.cloningToastId);
+      }
       toast.error(error?.message || 'Error al crear presupuesto Meta');
     },
   });

@@ -7,6 +7,7 @@ import { useConfirm } from '@/context/confirm-context';
 import Modal from '@/components/ui/modal';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
+import { showCloningToast, dismissCloningToast } from '@/utils/cloning-toast';
 
 interface PresupuestoGrupoCardAprobacionProps {
   id_aprobacion: string;
@@ -54,11 +55,33 @@ export default function PresupuestoGrupoCardAprobacion({
       message: `¿Está seguro de que desea aprobar este presupuesto?`,
       confirmText: 'Aprobar',
       cancelText: 'Cancelar',
-      onConfirm: () => {
-        aprobarMutation.mutate({
-          id_aprobacion,
-          comentario: undefined,
-        });
+      onConfirm: async () => {
+        // Solo para LICITACION_A_CONTRACTUAL mostramos el toast de clonado
+        let cloningToastId: string | undefined;
+        
+        if (tipoAprobacion === 'LICITACION_A_CONTRACTUAL') {
+          cloningToastId = showCloningToast();
+          // Pequeño delay para asegurar que el toast se renderice
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+        try {
+          await aprobarMutation.mutateAsync({
+            id_aprobacion,
+            comentario: undefined,
+          });
+          
+          // Cerrar el toast de clonado si existe
+          if (cloningToastId) {
+            dismissCloningToast(cloningToastId);
+          }
+        } catch (error) {
+          // Cerrar el toast de clonado si hay error
+          if (cloningToastId) {
+            dismissCloningToast(cloningToastId);
+          }
+          // El error ya se maneja en onError del hook
+        }
       },
     });
   };

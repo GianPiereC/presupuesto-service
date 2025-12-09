@@ -28,11 +28,12 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  {
-    name: 'Dashboard',
-    href: '/',
-    icon: LayoutDashboard,
-  },
+  // Dashboard - Comentado por ahora, puede usarse en el futuro
+  // {
+  //   name: 'Dashboard',
+  //   href: '/',
+  //   icon: LayoutDashboard,
+  // },
   {
     name: 'Proyectos',
     href: '/proyectos',

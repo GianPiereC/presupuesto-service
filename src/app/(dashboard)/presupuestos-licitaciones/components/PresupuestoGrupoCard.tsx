@@ -298,8 +298,8 @@ export default function PresupuestoGrupoCard({
                       <FileText className="w-4 h-4" />
                     </button>
                     
-                    {/* Botón Pasar a Contractual - Verde (oculto si está en revisión) */}
-                    {!estaEnRevision && (
+                    {/* Botón Pasar a Contractual - Verde (oculto si está en revisión o rechazada) */}
+                    {!estaEnRevision && version.estado !== 'rechazado' && (
                       <button
                         onClick={() => handlePasarAContractual(version)}
                         className="p-1.5 rounded-lg bg-green-500/10 hover:bg-green-500/20 text-green-600 dark:text-green-400 shadow-sm hover:shadow transition-all duration-200"

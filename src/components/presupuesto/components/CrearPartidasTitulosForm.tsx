@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { SearchSelect } from '@/components/ui/search-select';
+import { SearchInput, type SearchItem } from '@/components/ui/search-input';
 import { useEspecialidades } from '@/hooks/useEspecialidades';
+import { X } from 'lucide-react';
 
 interface CrearPartidasTitulosFormProps {
   nombre: string;
@@ -39,14 +40,44 @@ export default function CrearPartidasTitulosForm({
   const [localNombre, setLocalNombre] = useState(nombre);
   const [localIdEspecialidad, setLocalIdEspecialidad] = useState<string | null>(id_especialidadProp || null);
   const { data: especialidades, isLoading: isLoadingEspecialidades } = useEspecialidades();
+  const especialidadesCompletasRef = useRef<Map<string, { id_especialidad: string; nombre: string; descripcion: string }>>(new Map());
 
-  // Optimizar las opciones de especialidad con useMemo
-  const especialidadOptions = useMemo(() => {
+  // Actualizar el ref cuando cambian las especialidades
+  useEffect(() => {
+    if (especialidades) {
+      especialidadesCompletasRef.current.clear();
+      especialidades.forEach(esp => {
+        especialidadesCompletasRef.current.set(esp.id_especialidad, esp);
+      });
+    }
+  }, [especialidades]);
+
+  // Función para buscar especialidades (compatible con SearchInput)
+  const buscarEspecialidades = useCallback(async (query: string): Promise<SearchItem[]> => {
     if (!especialidades) return [];
-    return especialidades.map((esp) => ({
-      value: esp.id_especialidad,
-      label: esp.nombre,
-      description: esp.descripcion,
+    
+    const queryLower = query.toLowerCase().trim();
+    
+    // Si la query está vacía o tiene menos de 3 caracteres, retornar todas las especialidades
+    if (!queryLower || queryLower.length < 3) {
+      return especialidades.map(esp => ({
+        id: esp.id_especialidad,
+        nombre: esp.nombre,
+        codigo: esp.descripcion,
+      }));
+    }
+    
+    // Filtrar especialidades que coincidan con la búsqueda
+    const filtradas = especialidades.filter(esp => 
+      esp.nombre.toLowerCase().includes(queryLower) ||
+      esp.descripcion.toLowerCase().includes(queryLower) ||
+      esp.id_especialidad.toLowerCase().includes(queryLower)
+    );
+    
+    return filtradas.map(esp => ({
+      id: esp.id_especialidad,
+      nombre: esp.nombre,
+      codigo: esp.descripcion,
     }));
   }, [especialidades]);
 
@@ -140,17 +171,40 @@ export default function CrearPartidasTitulosForm({
           <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1.5">
             Especialidad (Opcional)
           </label>
-          <SearchSelect
-            value={localIdEspecialidad}
-            onChange={(value) => {
-              setLocalIdEspecialidad(value);
-            }}
-            options={especialidadOptions}
-            placeholder="Buscar especialidad..."
-            disabled={isLoadingEspecialidades}
-            isLoading={isLoadingEspecialidades}
-            emptyMessage="No se encontraron especialidades"
-          />
+          {localIdEspecialidad && especialidadesCompletasRef.current.has(localIdEspecialidad) ? (
+            <div className="flex items-center gap-2">
+              <div className="flex-1 px-3 py-2 rounded-md border border-[var(--border-color)] bg-[var(--background)] text-xs text-[var(--text-primary)]">
+                {especialidadesCompletasRef.current.get(localIdEspecialidad)?.nombre}
+              </div>
+              <button
+                type="button"
+                onClick={() => setLocalIdEspecialidad(null)}
+                className="px-2 py-2 rounded-md bg-[var(--background)]/50 hover:bg-[var(--background)]/70 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-all duration-200"
+                title="Limpiar selección"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
+            <SearchInput
+              placeholder="Buscar especialidad por nombre, descripción o ID..."
+              minChars={0}
+              onSearch={buscarEspecialidades}
+              onSelect={(item) => {
+                setLocalIdEspecialidad(item.id);
+              }}
+              renderItem={(item) => (
+                <div className="flex flex-col">
+                  <span className="text-xs font-medium text-[var(--text-primary)]">{item.nombre}</span>
+                  {item.codigo && (
+                    <span className="text-[10px] text-[var(--text-secondary)]">{item.codigo}</span>
+                  )}
+                </div>
+              )}
+              showInitialResults={true}
+              initialResultsCount={7}
+            />
+          )}
         </div>
       )}
 
