@@ -4,7 +4,7 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { Plus, Trash2, Save, Loader2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import AutocompleteRecurso from './AutocompleteRecurso';
+import { SearchInput, type SearchItem } from '@/components/ui/search-input';
 import { Recurso } from '@/hooks/useRecursos';
 import {
   useApuByPartida,
@@ -21,6 +21,7 @@ import { useUpdatePresupuesto, type APUEstructura } from '@/hooks/usePresupuesto
 import { mapearTipoCostoRecursoATipoApu } from '@/utils/tipoRecursoMapper';
 import { executeQuery, executeMutation } from '@/services/graphql-client';
 import { GET_PRECIO_RECURSO_BY_PRESUPUESTO_Y_RECURSO, GET_APU_BY_PARTIDA_QUERY } from '@/graphql/queries';
+import { LIST_RECURSOS_PAGINATED_QUERY } from '@/graphql/queries/recurso.queries';
 import { GET_ESTRUCTURA_PRESUPUESTO_QUERY } from '@/graphql/queries/presupuesto.queries';
 
 const GET_PARTIDA_QUERY = `
@@ -305,6 +306,44 @@ export default function DetallePartidaPanel({
                 return recursoBase;
               } else {
                 console.warn(`[DetallePartidaPanel] ⚠️ Subpartida con temp_id no encontrada en datos locales: ${r.id_partida_subpartida}`);
+                // Si no se encuentra en datos locales, buscar en apusCalculados
+                if (apusCalculados && r.id_partida_subpartida) {
+                  const apuSubpartidaCalculado = apusCalculados.find(apu => apu.id_partida === r.id_partida_subpartida);
+                  if (apuSubpartidaCalculado) {
+                    console.log(`[DetallePartidaPanel] ✅ APU de subpartida con temp_id encontrado en apusCalculados: ${apuSubpartidaCalculado.recursos?.length || 0} recursos`);
+                    // Usar el APU encontrado en apusCalculados
+                    const recursosSubpartida: RecursoAPUEditable[] = (apuSubpartidaCalculado.recursos || []).map((sr: any) => {
+                      const recursoSub: RecursoAPUEditable = {
+                        id_recurso_apu: sr.id_recurso_apu,
+                        recurso_id: sr.recurso_id || '',
+                        codigo_recurso: sr.codigo_recurso || '',
+                        descripcion: sr.descripcion,
+                        tipo_recurso: sr.tipo_recurso,
+                        unidad_medida: sr.unidad_medida,
+                        id_precio_recurso: sr.id_precio_recurso,
+                        precio: sr.precio || 0,
+                        cuadrilla: sr.cuadrilla,
+                        cantidad: sr.cantidad,
+                        desperdicio_porcentaje: sr.desperdicio_porcentaje || 0,
+                        parcial: 0, // Se calculará después
+                        orden: sr.orden,
+                        enEdicion: false,
+                        esNuevo: false,
+                        esSubpartida: false,
+                        tiene_precio_override: sr.tiene_precio_override || false,
+                        precio_override: sr.precio_override,
+                      };
+                      return recursoSub;
+                    });
+                    
+                    recursoBase.recursosSubpartida = recursosSubpartida;
+                    recursoBase.rendimientoSubpartida = apuSubpartidaCalculado.rendimiento || 1.0;
+                    recursoBase.jornadaSubpartida = apuSubpartidaCalculado.jornada || 8;
+                    recursoBase.id_partida_original = id_partida || undefined;
+                    
+                    return recursoBase;
+                  }
+                }
                 // Continuar sin cargar recursos (la subpartida aún no existe)
                 return recursoBase;
               }
@@ -616,6 +655,44 @@ export default function DetallePartidaPanel({
     setRecursosEditables([...recursosEditables, nuevaFila]);
     setHasChanges(true);
   };
+
+  // Almacenar recursos completos para poder usarlos al seleccionar
+  const recursosCompletosRef = useRef<Map<string, Recurso>>(new Map());
+
+  // Función de búsqueda para SearchInput
+  const buscarRecursos = useCallback(async (query: string): Promise<SearchItem[]> => {
+    try {
+      const response = await executeQuery<{ listRecursosPaginated: any }>(
+        LIST_RECURSOS_PAGINATED_QUERY,
+        { 
+          input: {
+            page: 1,
+            itemsPage: query ? 20 : 7, // Si no hay query, solo traer 7 para resultados iniciales
+            searchTerm: query || undefined, // Si query está vacío, no enviar searchTerm
+          }
+        }
+      );
+      
+      if (response?.listRecursosPaginated?.recursos) {
+        // Guardar recursos completos en el ref
+        response.listRecursosPaginated.recursos.forEach((r: Recurso) => {
+          recursosCompletosRef.current.set(r.id, r);
+        });
+        
+        return response.listRecursosPaginated.recursos.map((r: Recurso): SearchItem => ({
+          id: r.id,
+          nombre: r.nombre,
+          codigo: r.codigo,
+          precio_actual: r.precio_actual,
+          vigente: r.vigente,
+        }));
+      }
+      return [];
+    } catch (error) {
+      console.error('Error al buscar recursos:', error);
+      return [];
+    }
+  }, []);
 
   const handleSeleccionarRecurso = async (recursoId: string, recurso: Recurso) => {
     const tipoRecurso = mapearTipoCostoRecursoATipoApu(
@@ -1443,16 +1520,24 @@ export default function DetallePartidaPanel({
         });
 
         // Actualizar recursos editables con IDs reales
-        let recursosActualizados = 0;
-        recursosEditables.forEach(recurso => {
-          if (recurso.esSubpartida && recurso.id_partida_subpartida && mapeoTempIdARealId.has(recurso.id_partida_subpartida)) {
-            const idReal = mapeoTempIdARealId.get(recurso.id_partida_subpartida)!;
-            console.log(`[DetallePartidaPanel] ✅ Actualizando recurso subpartida: ${recurso.id_partida_subpartida} -> ${idReal}`);
-            recurso.id_partida_subpartida = idReal;
-            recursosActualizados++;
-          }
+        setRecursosEditables(prev => {
+          const nuevosRecursos = prev.map(recurso => {
+            if (recurso.esSubpartida && recurso.id_partida_subpartida && mapeoTempIdARealId.has(recurso.id_partida_subpartida)) {
+              const idReal = mapeoTempIdARealId.get(recurso.id_partida_subpartida)!;
+              console.log(`[DetallePartidaPanel] ✅ Actualizando recurso subpartida: ${recurso.id_partida_subpartida} -> ${idReal}`);
+              return {
+                ...recurso,
+                id_partida_subpartida: idReal
+              };
+            }
+            return recurso;
+          });
+          const recursosActualizados = nuevosRecursos.filter(r => 
+            r.esSubpartida && r.id_partida_subpartida && !r.id_partida_subpartida.startsWith('temp_')
+          ).length;
+          console.log(`[DetallePartidaPanel] ✅ ${recursosActualizados} recursos actualizados con IDs reales`);
+          return nuevosRecursos;
         });
-        console.log(`[DetallePartidaPanel] ✅ ${recursosActualizados} recursos actualizados con IDs reales`);
 
         // Invalidar queries para refrescar datos
         queryClient.invalidateQueries({ queryKey: ['apu'] });
@@ -1666,12 +1751,21 @@ export default function DetallePartidaPanel({
         }
 
         // Actualizar APU (rendimiento/jornada) usando mutación directa para evitar toast automático
+        // Asegurar que se usen los valores actuales del input, parseando desde el string si es necesario
+        // Esto es importante porque el usuario puede haber escrito un valor que aún no se ha actualizado en el estado
+        const rendimientoActual = rendimientoInput ? parseFloat(rendimientoInput) : (rendimiento || 1.0);
+        const jornadaActual = jornadaInput ? parseFloat(jornadaInput) : (jornada || 8);
+        
+        // Validar que los valores sean números válidos
+        const rendimientoFinal = isNaN(rendimientoActual) || rendimientoActual <= 0 ? 1.0 : truncateToFour(rendimientoActual);
+        const jornadaFinal = isNaN(jornadaActual) || jornadaActual <= 0 ? 8 : truncateToFour(jornadaActual);
+        
         await executeMutation<{ updateApu: any }>(
           UPDATE_APU_MUTATION,
           {
             id_apu: apuParaActualizar.id_apu,
-            rendimiento: rendimiento,
-            jornada: jornada,
+            rendimiento: rendimientoFinal,
+            jornada: jornadaFinal,
           }
         );
         // Invalidar queries sin mostrar toast
@@ -1684,7 +1778,16 @@ export default function DetallePartidaPanel({
         const recursoCambio = (editable: RecursoAPUEditable, existente: any): boolean => {
           if (!existente) return true;
           const tolerancia = 0.0001;
+          
+          // Verificar si cambió el id_partida_subpartida (especialmente de temp_id a id_real)
+          const idSubpartidaCambio = Boolean(
+            editable.esSubpartida === true && 
+            editable.id_partida_subpartida !== undefined &&
+            editable.id_partida_subpartida !== existente.id_partida_subpartida
+          );
+          
           return (
+            idSubpartidaCambio ||
             Math.abs((editable.cantidad || 0) - (existente.cantidad || 0)) > tolerancia ||
             Math.abs((editable.precio || 0) - (existente.precio || 0)) > tolerancia ||
             Math.abs((editable.parcial || 0) - (existente.parcial || 0)) > tolerancia ||
@@ -1693,7 +1796,8 @@ export default function DetallePartidaPanel({
             editable.id_precio_recurso !== existente.id_precio_recurso ||
             editable.orden !== existente.orden ||
             editable.tiene_precio_override !== existente.tiene_precio_override ||
-            Math.abs((editable.precio_override || 0) - (existente.precio_override || 0)) > tolerancia
+            Math.abs((editable.precio_override || 0) - (existente.precio_override || 0)) > tolerancia ||
+            Boolean(editable.esSubpartida && Math.abs((editable.precio_unitario_subpartida || 0) - (existente.precio_unitario_subpartida || 0)) > tolerancia)
           );
         };
 
@@ -1710,6 +1814,13 @@ export default function DetallePartidaPanel({
           const recursoExistente = recursosExistentes.find(
             r => r.id_recurso_apu === recursoEditable.id_recurso_apu
           );
+
+          // Aplicar mapeo de temp_id a id_real si existe (igual que todo lo demás)
+          let idPartidaSubpartidaMapeado = recursoEditable.id_partida_subpartida;
+          if (recursoEditable.esSubpartida && idPartidaSubpartidaMapeado && mapeoTempIdARealId.has(idPartidaSubpartidaMapeado)) {
+            idPartidaSubpartidaMapeado = mapeoTempIdARealId.get(idPartidaSubpartidaMapeado)!;
+            console.log(`[DetallePartidaPanel] 🔄 Mapeando id_partida_subpartida en recursoInput: ${recursoEditable.id_partida_subpartida} -> ${idPartidaSubpartidaMapeado}`);
+          }
 
           const baseInput = {
             codigo_recurso: recursoEditable.esSubpartida ? (recursoEditable.codigo_recurso || '') : recursoEditable.codigo_recurso,
@@ -1730,7 +1841,7 @@ export default function DetallePartidaPanel({
 
           const recursoInput: RecursoApuInput = recursoEditable.esSubpartida ? {
             ...baseInput,
-            id_partida_subpartida: recursoEditable.id_partida_subpartida,
+            id_partida_subpartida: idPartidaSubpartidaMapeado,
             precio_unitario_subpartida: roundToTwo(recursoEditable.precio_unitario_subpartida || 0),
             recurso_id: recursoEditable.recurso_id || undefined,
           } : {
@@ -2235,16 +2346,6 @@ export default function DetallePartidaPanel({
                 />
               )}
             </div>
-            <div className="flex items-center">
-              <span className="text-[var(--text-secondary)]">Estado:</span>
-              <Input
-                type="text"
-                value={hasPartida ? partida!.estado : ''}
-                disabled
-                placeholder="---"
-                className="text-xs h-6 w-20 px-1 ml-1"
-              />
-            </div>
           </div>
         </div>
 
@@ -2444,7 +2545,7 @@ export default function DetallePartidaPanel({
                     Insumo
                   </th>
                   <th className="px-1 py-1 text-center font-medium text-[var(--text-secondary)] uppercase w-[8%]">Und.</th>
-                  <th className="px-1 py-1 text-center font-medium text-[var(--text-secondary)] uppercase w-[8%]">Cuad.</th>
+                  <th className="px-1 py-1 text-center font-medium text-[var(--text-secondary)] uppercase w-[8%]">Cuadrilla</th>
                   <th className="px-1 py-1 text-center font-medium text-[var(--text-secondary)] uppercase w-[12%]">Cantidad</th>
                   <th className="px-1 py-1 text-center font-medium text-[var(--text-secondary)] uppercase w-[12%]">P.U.</th>
                   <th className="px-1 py-1 text-right font-medium text-[var(--text-secondary)] uppercase w-[15%]">Parcial</th>
@@ -2460,11 +2561,43 @@ export default function DetallePartidaPanel({
                     >
                       <td className="pl-3 pr-1 py-1 text-left align-top">
                         {modoReal === 'edicion' && recurso.enEdicion && !recurso.recurso_id ? (
-                          <AutocompleteRecurso
-                            value={recurso.descripcion}
-                            onSelect={(r: Recurso) => handleSeleccionarRecurso(recurso.id_recurso_apu, r)}
+                          <SearchInput
                             placeholder="Buscar recurso..."
+                            onSearch={buscarRecursos}
+                            onSelect={(item: SearchItem) => {
+                              // Obtener el recurso completo del ref
+                              const recursoCompleto = recursosCompletosRef.current.get(item.id);
+                              if (recursoCompleto) {
+                                handleSeleccionarRecurso(recurso.id_recurso_apu, recursoCompleto);
+                              }
+                            }}
+                            renderItem={(item: SearchItem) => {
+                              const recursoCompleto = recursosCompletosRef.current.get(item.id);
+                              return (
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="text-[11px] text-[var(--text-primary)] truncate">
+                                      {item.nombre}
+                                    </div>
+                                    {item.codigo && (
+                                      <div className="text-[10px] text-[var(--text-secondary)] truncate">
+                                        {item.codigo}
+                                      </div>
+                                    )}
+                                  </div>
+                                  {recursoCompleto?.unidad?.nombre && (
+                                    <span className="text-[10px] text-[var(--text-secondary)] whitespace-nowrap">
+                                      {recursoCompleto.unidad.nombre}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            }}
                             className="text-xs"
+                            minChars={2}
+                            inputHeight="h-6"
+                            showInitialResults={true}
+                            initialResultsCount={7}
                           />
                         ) : (
                           <div
@@ -2535,7 +2668,13 @@ export default function DetallePartidaPanel({
                               type="number"
                               step="0.0001"
                               min="0"
-                              value={recurso.cuadrilla ?? ''}
+                              value={recurso.cuadrilla === 0 ? '' : (recurso.cuadrilla ?? '')}
+                              onFocus={(e) => {
+                                // Si el valor es 0, limpiar el campo
+                                if (recurso.cuadrilla === 0) {
+                                  e.target.value = '';
+                                }
+                              }}
                               onChange={(e) => {
                                 const value = e.target.value;
                                 if (value === '' || value === '-') {
@@ -2545,6 +2684,12 @@ export default function DetallePartidaPanel({
                                 const numValue = parseFloat(value);
                                 if (!isNaN(numValue) && numValue >= 0) {
                                   handleUpdateRecurso(recurso.id_recurso_apu, 'cuadrilla', numValue);
+                                }
+                              }}
+                              onBlur={(e) => {
+                                // Si el campo queda vacío al perder el focus, restaurar 0
+                                if (e.target.value === '' || e.target.value === '-') {
+                                  handleUpdateRecurso(recurso.id_recurso_apu, 'cuadrilla', 0);
                                 }
                               }}
                               className="text-xs h-6 w-full text-center px-1"
@@ -2564,7 +2709,13 @@ export default function DetallePartidaPanel({
                                   type="number"
                                   step="0.0001"
                                   min="0"
-                                  value={recurso.cantidad ?? ''}
+                                  value={recurso.cantidad === 0 ? '' : (recurso.cantidad ?? '')}
+                                  onFocus={(e) => {
+                                    // Si el valor es 0, limpiar el campo
+                                    if (recurso.cantidad === 0) {
+                                      e.target.value = '';
+                                    }
+                                  }}
                                   onChange={(e) => {
                                     const value = e.target.value;
                                     if (value === '' || value === '-') {
@@ -2574,6 +2725,12 @@ export default function DetallePartidaPanel({
                                     const numValue = parseFloat(value);
                                     if (!isNaN(numValue) && numValue >= 0) {
                                       handleUpdateRecurso(recurso.id_recurso_apu, 'cantidad', numValue);
+                                    }
+                                  }}
+                                  onBlur={(e) => {
+                                    // Si el campo queda vacío al perder el focus, restaurar 0
+                                    if (e.target.value === '' || e.target.value === '-') {
+                                      handleUpdateRecurso(recurso.id_recurso_apu, 'cantidad', 0);
                                     }
                                   }}
                                   className={`text-xs h-6 w-full text-center ${esEquipoPorcentajeMo ? 'pr-4' : 'px-1'}`}
@@ -2613,9 +2770,15 @@ export default function DetallePartidaPanel({
                             <div className="flex items-center gap-1 justify-center">
                               <Input
                                 type="number"
-                                step="0.0001"
+                                step="0.01"
                                 min="0"
-                                value={recurso.precio ?? ''}
+                                value={recurso.precio === 0 ? '' : (recurso.precio ?? '')}
+                                onFocus={(e) => {
+                                  // Si el valor es 0, limpiar el campo
+                                  if (recurso.precio === 0) {
+                                    e.target.value = '';
+                                  }
+                                }}
                                 onChange={(e) => {
                                   const value = e.target.value;
                                   if (value === '' || value === '-') {
@@ -2638,6 +2801,16 @@ export default function DetallePartidaPanel({
                                   } else {
                                     // Si no es válido, restaurar el valor anterior
                                     handleUpdateRecurso(recurso.id_recurso_apu, 'precio', recurso.precio || 0);
+                                  }
+                                }}
+                                onBlur={(e) => {
+                                  // Si el campo queda vacío al perder el focus, restaurar 0
+                                  if (e.target.value === '' || e.target.value === '-') {
+                                    handleUpdateRecurso(recurso.id_recurso_apu, 'precio', 0);
+                                    // Si tiene override activado, actualizar también precio_override
+                                    if (recurso.tiene_precio_override) {
+                                      handleUpdateRecurso(recurso.id_recurso_apu, 'precio_override', 0 as number);
+                                    }
                                   }
                                 }}
                                 onKeyDown={(e) => {

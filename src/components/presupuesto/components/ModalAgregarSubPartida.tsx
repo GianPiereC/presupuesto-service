@@ -1033,14 +1033,17 @@ export default function ModalAgregarSubPartida({
       <div className="h-full flex flex-col bg-[var(--background)] min-h-[420px] max-h-[56vh]">
         {/* Buscador de Partidas - Solo mostrar si no hay partida seleccionada y no es modo lectura */}
         {!hasPartida && !esModoLectura && (
-          <div className="flex-shrink-0 px-2 py-1.5 border-b border-[var(--border-color)] bg-[var(--card-bg)]">
-            <div className="flex items-center gap-2 text-[10px]">
+          <div className="flex-shrink-0 px-1 py-0.5 border-b border-[var(--border-color)] bg-[var(--card-bg)]">
+            <div className="flex items-center gap-1 text-xs">
               <span className="text-[var(--text-secondary)] whitespace-nowrap">Buscar Partida:</span>
               <div className="flex-1">
                 <AutocompletePartida
                   onSelect={handleSelectPartida}
                   placeholder="Buscar por descripción, item o código..."
-                  partidas={partidas}
+                  partidas={partidas.filter(p => !p.id_partida_padre)}
+                  id_partida_padre={id_partida_padre || null}
+                  showInitialResults={true}
+                  initialResultsCount={5}
                 />
               </div>
             </div>
@@ -1051,9 +1054,9 @@ export default function ModalAgregarSubPartida({
         {hasPartida && (
           <div className="flex-shrink-0 border-b border-[var(--border-color)] bg-[var(--card-bg)] relative z-0 table-header-shadow">
             {/* Datos de Partida */}
-            <div className="px-2 py-1.5 border-b border-[var(--border-color)]">
-              <div className="flex items-center gap-3 flex-wrap text-xs">
-                <div className="flex items-center gap-1 flex-1">
+            <div className="px-1 py-1 border-b border-[var(--border-color)]">
+              <div className="flex items-center gap-1.5 flex-wrap text-xs">
+                <div className="flex items-center gap-0.5 flex-1">
                   <span className="text-[var(--text-secondary)] whitespace-nowrap">Partida:</span>
                   {!subPartidaParaEditar && !esModoLectura ? (
                     <Input
@@ -1064,70 +1067,45 @@ export default function ModalAgregarSubPartida({
                         setHasChanges(true);
                       }}
                       placeholder="Descripción de la subpartida"
-                      className="text-xs h-6 flex-1 font-medium"
+                      className="text-xs h-5 flex-1 font-medium"
                     />
                   ) : (
                     <Input
                       type="text"
                       value={subPartidaParaEditar ? partidaSeleccionada.descripcion : descripcionSubpartida || partidaSeleccionada.descripcion}
                       disabled
-                      className="text-xs h-6 flex-1 font-medium"
+                      className="text-xs h-5 flex-1 font-medium"
                     />
                   )}
                 </div>
                 <div className="flex items-center">
-                  <span className="text-[var(--text-secondary)]">Item:</span>
+                  <span className="text-[var(--text-secondary)] text-xs">Item:</span>
                   <Input
                     type="text"
                     value={partidaSeleccionada.numero_item}
                     disabled
                     placeholder="---"
-                    className="text-xs h-6 w-20 text-center px-1 ml-1 font-mono"
+                    className="text-xs h-5 w-16 text-center px-0.5 ml-0.5 font-mono"
                   />
                 </div>
-                <div className="flex items-center gap-1">
-                  <span className="text-[var(--text-secondary)]">Unidad:</span>
+                <div className="flex items-center gap-0.5">
+                  <span className="text-[var(--text-secondary)] text-xs">Unidad:</span>
                   <Input
                     type="text"
                     value={partidaSeleccionada.unidad_medida}
                     disabled
                     placeholder="---"
-                    className="text-xs h-6 w-16 text-center px-1"
-                  />
-                </div>
-                <div className="flex items-center gap-1">
-                  <span className="text-[var(--text-secondary)]">Metrado:</span>
-                  <Input
-                    type="text"
-                    value={partidaSeleccionada.metrado.toLocaleString('es-PE', {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                    disabled
-                    placeholder="0.00"
-                    className="text-xs h-6 w-16 text-center px-1"
-                  />
-                </div>
-                <div className="flex items-center">
-                  <span className="text-[var(--text-secondary)]">Estado:</span>
-                  <Input
-                    type="text"
-                    value={partidaSeleccionada.estado}
-                    disabled
-                    placeholder="---"
-                    className={`text-xs h-6 w-20 text-center px-1 ml-1 ${
-                      partidaSeleccionada.estado === 'Activa' ? 'text-green-600' : 'text-gray-500'
-                    }`}
+                    className="text-xs h-5 w-12 text-center px-0.5"
                   />
                 </div>
               </div>
             </div>
 
             {/* Datos de APU - Rendimiento y Jornada */}
-            <div className="px-2 py-1.5 border-b border-[var(--border-color)]">
-              <div className="grid grid-cols-4 gap-2 text-xs">
-                <div className="flex items-center gap-1">
-                  <span className="text-[var(--text-secondary)]">Rendimiento:</span>
+            <div className="px-1 py-1 border-b border-[var(--border-color)]">
+              <div className="grid grid-cols-4 gap-1 text-xs">
+                <div className="flex items-center gap-0.5">
+                  <span className="text-[var(--text-secondary)] text-xs">Rendimiento:</span>
                   {!esModoLectura ? (
                     <Input
                       type="number"
@@ -1164,7 +1142,7 @@ export default function ModalAgregarSubPartida({
                           setRendimiento(truncated);
                         }
                       }}
-                      className="text-xs h-6 w-16 text-center px-1"
+                      className="text-xs h-5 w-14 text-center px-0.5"
                     />
                   ) : (
                     <Input
@@ -1172,12 +1150,12 @@ export default function ModalAgregarSubPartida({
                       value={rendimiento.toFixed(4)}
                       disabled
                       placeholder="1.0000"
-                      className="text-xs h-6 w-16 text-center px-1"
+                      className="text-xs h-5 w-14 text-center px-0.5"
                     />
                   )}
                 </div>
-                <div className="flex items-center gap-1">
-                  <span className="text-[var(--text-secondary)]">Jornada:</span>
+                <div className="flex items-center gap-0.5">
+                  <span className="text-[var(--text-secondary)] text-xs">Jornada:</span>
                   {!esModoLectura ? (
                     <Input
                       type="number"
@@ -1214,7 +1192,7 @@ export default function ModalAgregarSubPartida({
                           setJornada(truncated);
                         }
                       }}
-                      className="text-xs h-6 w-16 text-center px-1"
+                      className="text-xs h-5 w-14 text-center px-0.5"
                     />
                   ) : (
                     <Input
@@ -1222,64 +1200,64 @@ export default function ModalAgregarSubPartida({
                       value={jornada.toFixed(4)}
                       disabled
                       placeholder="8.0000"
-                      className="text-xs h-6 w-16 text-center px-1"
+                      className="text-xs h-5 w-14 text-center px-0.5"
                     />
                   )}
                   <span className="text-xs text-[var(--text-secondary)]">h</span>
                 </div>
-                <div>
-                  <span className="text-[var(--text-secondary)]">Precio Unit.:</span>
+                <div className="flex items-center gap-0.5">
+                  <span className="text-[var(--text-secondary)] text-xs">Precio Unit.:</span>
                   <Input
                     type="text"
                     value={`S/ ${partidaSeleccionada.precio_unitario.toFixed(2)}`}
                     disabled
                     placeholder="S/ 0.00"
-                    className="text-xs h-6 w-24 px-1 ml-1"
+                    className="text-xs h-5 w-20 px-0.5"
                   />
                 </div>
-                <div>
-                  <span className="text-[var(--text-secondary)]">Costo Directo:</span>
+                <div className="flex items-center gap-0.5">
+                  <span className="text-[var(--text-secondary)] text-xs">Costo Directo:</span>
                   <Input
                     type="text"
                     value={`S/ ${totales.costo_directo.toFixed(2)}`}
                     disabled
                     placeholder="S/ 0.00"
-                    className="text-xs h-6 w-24 px-1 ml-1"
+                    className="text-xs h-5 w-20 px-0.5"
                   />
                 </div>
               </div>
             </div>
 
             {/* Resumen de Costos */}
-            <div className="px-2 py-1.5 table-header-shadow">
-              <div className="flex items-center gap-2">
+            <div className="px-1 py-1 table-header-shadow">
+              <div className="flex items-center gap-1">
                 <span className="text-xs text-[var(--text-secondary)]">Resumen:</span>
                 {hasPartida ? (
-                  <div className="flex gap-1.5">
-                    <div className={`px-1.5 py-0.5 rounded text-xs ${getTipoRecursoColor('MANO_OBRA')}`}>
+                  <div className="flex gap-1">
+                    <div className={`px-1 py-0.5 rounded text-xs ${getTipoRecursoColor('MANO_OBRA')}`}>
                       MO: S/ {totales.costo_mano_obra.toFixed(2)}
                     </div>
-                    <div className={`px-1.5 py-0.5 rounded text-xs ${getTipoRecursoColor('MATERIAL')}`}>
+                    <div className={`px-1 py-0.5 rounded text-xs ${getTipoRecursoColor('MATERIAL')}`}>
                       MT: S/ {totales.costo_materiales.toFixed(2)}
                     </div>
-                    <div className={`px-1.5 py-0.5 rounded text-xs ${getTipoRecursoColor('EQUIPO')}`}>
+                    <div className={`px-1 py-0.5 rounded text-xs ${getTipoRecursoColor('EQUIPO')}`}>
                       EQ: S/ {totales.costo_equipos.toFixed(2)}
                     </div>
                     {totales.costo_subcontratos > 0 && (
-                      <div className={`px-1.5 py-0.5 rounded text-xs ${getTipoRecursoColor('SUBCONTRATO')}`}>
+                      <div className={`px-1 py-0.5 rounded text-xs ${getTipoRecursoColor('SUBCONTRATO')}`}>
                         SC: S/ {totales.costo_subcontratos.toFixed(2)}
                       </div>
                     )}
                   </div>
                 ) : (
-                  <div className="flex gap-1.5">
-                    <div className="px-1.5 py-0.5 rounded text-xs bg-gray-500/10 text-gray-600 dark:text-gray-400 opacity-50">
+                  <div className="flex gap-1">
+                    <div className="px-1 py-0.5 rounded text-xs bg-gray-500/10 text-gray-600 dark:text-gray-400 opacity-50">
                       MO: S/ 0.00
                     </div>
-                    <div className="px-1.5 py-0.5 rounded text-xs bg-gray-500/10 text-gray-600 dark:text-gray-400 opacity-50">
+                    <div className="px-1 py-0.5 rounded text-xs bg-gray-500/10 text-gray-600 dark:text-gray-400 opacity-50">
                       MT: S/ 0.00
                     </div>
-                    <div className="px-1.5 py-0.5 rounded text-xs bg-gray-500/10 text-gray-600 dark:text-gray-400 opacity-50">
+                    <div className="px-1 py-0.5 rounded text-xs bg-gray-500/10 text-gray-600 dark:text-gray-400 opacity-50">
                       EQ: S/ 0.00
                     </div>
                   </div>
@@ -1293,13 +1271,13 @@ export default function ModalAgregarSubPartida({
         <div className="flex-1 overflow-y-auto min-h-0">
           {!hasPartida ? (
             <div className="flex items-center justify-center h-full">
-              <p className="text-[10px] text-[var(--text-secondary)] italic">
+              <p className="text-xs text-[var(--text-secondary)] italic">
                 Busque y seleccione una partida para ver sus recursos
               </p>
             </div>
           ) : isLoadingApu ? (
             <div className="flex items-center justify-center h-full">
-              <div className="text-[10px] text-[var(--text-secondary)]">Cargando...</div>
+              <div className="text-xs text-[var(--text-secondary)]">Cargando...</div>
             </div>
           ) : (
             <div className="py-1">

@@ -81,8 +81,8 @@ export default function EstructuraPresupuestoEditor({
   const [itemSeleccionado, setItemSeleccionado] = useState<string | null>(null);
   const [itemCortado, setItemCortado] = useState<string | null>(null);
 
-  // Estado para el panel redimensionable (porcentaje del panel inferior, inicialmente 25%)
-  const [panelInferiorHeight, setPanelInferiorHeight] = useState(25);
+  // Estado para el panel redimensionable (porcentaje del panel inferior, inicialmente 30%)
+  const [panelInferiorHeight, setPanelInferiorHeight] = useState(40);
   const [isResizing, setIsResizing] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -575,11 +575,11 @@ export default function EstructuraPresupuestoEditor({
 
   // Ajustar tamaño del panel automáticamente cuando se selecciona una partida
   useEffect(() => {
-    if (partidaSeleccionada && panelInferiorHeight < 40) {
-      setPanelInferiorHeight(40);
-    } else if (!partidaSeleccionada && panelInferiorHeight > 25) {
+    if (partidaSeleccionada && panelInferiorHeight < 50) {
+      setPanelInferiorHeight(50);
+    } else if (!partidaSeleccionada && panelInferiorHeight > 30) {
       // Opcional: reducir cuando no hay partida seleccionada
-      // setPanelInferiorHeight(25);
+      // setPanelInferiorHeight(30);
     }
   }, [partidaSeleccionada]);
 
