@@ -60,7 +60,7 @@ export interface ProyectoConAprobaciones {
       total_presupuesto: number;
       descripcion_version?: string;
     }>;
-    tipoAprobacion: 'LICITACION_A_CONTRACTUAL' | 'CONTRACTUAL_A_META' | 'NUEVA_VERSION_META';
+    tipoAprobacion: 'LICITACION_A_CONTRACTUAL' | 'CONTRACTUAL_A_META' | 'NUEVA_VERSION_META' | 'OFICIALIZAR_META';
   }>;
 }
 

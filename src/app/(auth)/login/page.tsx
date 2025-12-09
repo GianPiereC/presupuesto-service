@@ -19,7 +19,7 @@ function LoginForm() {
   // Si ya está autenticado, redirigir
   useEffect(() => {
     if (isAuthenticated) {
-      const redirect = searchParams.get('redirect') || '/';
+      const redirect = searchParams.get('redirect') || '/proyectos';
       router.push(redirect);
     }
   }, [isAuthenticated, router, searchParams]);
@@ -32,8 +32,8 @@ function LoginForm() {
       await login(usuario, contrasenna);
       toast.success('Inicio de sesión exitoso');
 
-      // Redirigir a la ruta original o al dashboard
-      const redirect = searchParams.get('redirect') || '/';
+      // Redirigir a la ruta original o a proyectos
+      const redirect = searchParams.get('redirect') || '/proyectos';
       router.push(redirect);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Error al iniciar sesión');

@@ -1,7 +1,8 @@
 'use client';
 
-import { DollarSign, Calendar, CheckCircle2, XCircle, ArrowRight } from 'lucide-react';
+import { DollarSign, Calendar, CheckCircle2, XCircle, ArrowRight, ListTree } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAprobarPresupuesto, useRechazarPresupuesto } from '@/hooks/useAprobaciones';
 import { useConfirm } from '@/context/confirm-context';
 import Modal from '@/components/ui/modal';
@@ -36,6 +37,7 @@ export default function PresupuestoGrupoCardAprobacion({
   versiones,
   tipoAprobacion,
 }: PresupuestoGrupoCardAprobacionProps) {
+  const router = useRouter();
   const aprobarMutation = useAprobarPresupuesto();
   const rechazarMutation = useRechazarPresupuesto();
   const { confirm } = useConfirm();
@@ -89,6 +91,11 @@ export default function PresupuestoGrupoCardAprobacion({
   const handleRechazar = () => {
     setComentarioRechazo('');
     setIsRechazarModalOpen(true);
+  };
+
+  const handleVerEstructura = (id_presupuesto: string) => {
+    // En aprobación, siempre modo lectura
+    router.push(`/presupuestos-aprobacion/estructura?presupuesto=${id_presupuesto}&modo=lectura`);
   };
 
   const handleConfirmarRechazar = () => {
@@ -215,6 +222,15 @@ export default function PresupuestoGrupoCardAprobacion({
 
                   {/* Botones de acción de aprobación con texto */}
                   <div className="flex items-center gap-2 flex-shrink-0">
+                    {/* Botón Estructura - Azul */}
+                    <button
+                      onClick={() => handleVerEstructura(version.id_presupuesto)}
+                      className="p-1.5 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 shadow-sm hover:shadow transition-all duration-200"
+                      title="Ver estructura del presupuesto"
+                    >
+                      <ListTree className="w-4 h-4" />
+                    </button>
+                    
                     {/* Botón Aprobar - Verde */}
                     <button
                       onClick={handleAprobar}

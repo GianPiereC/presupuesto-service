@@ -662,48 +662,100 @@ export default function EstructuraPresupuestoEditor({
    * Reordena los items de un padre para asegurar ordenes secuenciales (1, 2, 3, ...)
    */
   const reordenarItemsPadre = useCallback((idPadre: string | null) => {
-    // Reordenar títulos
-    setTitulos(prevTitulos => {
-      const titulosDelPadre = prevTitulos
-        .filter(t => t.id_titulo_padre === idPadre)
-        .sort((a, b) => a.orden - b.orden);
+    // Usar setTimeout para asegurar que se ejecute después de que todos los cambios se hayan aplicado
+    setTimeout(() => {
+      // Obtener valores actualizados de ambos estados usando la forma funcional
+      setTitulos(prevTitulos => {
+        setPartidas(prevPartidas => {
+          // Obtener todos los items del mismo padre (títulos + partidas) mezclados
+          // IMPORTANTE: Todos los hermanos (títulos y partidas) se normalizan juntos
+          const itemsMismoPadre: Array<{ id: string; tipo: 'TITULO' | 'PARTIDA'; orden: number }> = [];
 
-      return prevTitulos.map(t => {
-        if (t.id_titulo_padre === idPadre) {
-          const indice = titulosDelPadre.findIndex(tit => tit.id_titulo === t.id_titulo);
-          return { ...t, orden: indice + 1 };
-        }
-        return t;
-      });
-    });
+          // Títulos del padre
+          const titulosDelPadre = prevTitulos.filter(t => t.id_titulo_padre === idPadre);
+          titulosDelPadre.forEach(t => itemsMismoPadre.push({ id: t.id_titulo, tipo: 'TITULO', orden: t.orden }));
 
-    // Reordenar partidas (necesitamos el estado actualizado de titulos)
-    setTitulos(prevTitulos => {
-      setPartidas(prevPartidas => {
-        const partidasDelPadre = prevPartidas
-          .filter(p => {
-            if (idPadre === null) {
-              return prevTitulos.some(t => t.id_titulo === p.id_titulo && t.id_titulo_padre === null) && p.id_partida_padre === null;
-            }
-            return p.id_titulo === idPadre && p.id_partida_padre === null;
-          })
-          .sort((a, b) => a.orden - b.orden);
-
-        return prevPartidas.map(p => {
-          const esPartidaDelPadre = idPadre === null
-            ? prevTitulos.some(t => t.id_titulo === p.id_titulo && t.id_titulo_padre === null) && p.id_partida_padre === null
-            : p.id_titulo === idPadre && p.id_partida_padre === null;
-
-          if (esPartidaDelPadre) {
-            const indice = partidasDelPadre.findIndex(part => part.id_partida === p.id_partida);
-            return { ...p, orden: indice + 1 };
+          // Partidas del padre (solo principales, sin id_partida_padre)
+          if (idPadre === null) {
+            // Si no hay padre, las partidas pertenecen a títulos raíz
+            const titulosRaiz = prevTitulos.filter(t => t.id_titulo_padre === null);
+            titulosRaiz.forEach(tituloRaiz => {
+              const partidasRaiz = prevPartidas.filter(p => p.id_titulo === tituloRaiz.id_titulo && p.id_partida_padre === null);
+              partidasRaiz.forEach(p => itemsMismoPadre.push({ id: p.id_partida, tipo: 'PARTIDA', orden: p.orden }));
+            });
+          } else {
+            const partidasDelPadre = prevPartidas.filter(p => p.id_titulo === idPadre && p.id_partida_padre === null);
+            partidasDelPadre.forEach(p => itemsMismoPadre.push({ id: p.id_partida, tipo: 'PARTIDA', orden: p.orden }));
           }
-          return p;
-        });
-      });
 
-      return prevTitulos;
-    });
+          // Ordenar todos los items por orden actual (títulos y partidas juntos)
+          itemsMismoPadre.sort((a, b) => a.orden - b.orden);
+          
+          // Normalizar: asignar órdenes consecutivos
+          // Para ROOT: normalizar títulos raíz primero, luego partidas de cada título independientemente
+          // Para otros padres: normalizar todos los items juntos (títulos + partidas)
+          let titulosActualizados = prevTitulos;
+          let partidasActualizadas = prevPartidas;
+
+          if (idPadre === null) {
+            // Para ROOT: normalizar títulos raíz primero
+            const titulosRaiz = prevTitulos.filter(t => t.id_titulo_padre === null).sort((a, b) => a.orden - b.orden);
+            
+            titulosActualizados = prevTitulos.map(t => {
+              if (t.id_titulo_padre === null) {
+                const indice = titulosRaiz.findIndex(tr => tr.id_titulo === t.id_titulo);
+                if (indice !== -1) {
+                  return { ...t, orden: indice + 1 };
+                }
+              }
+              return t;
+            });
+
+            // Luego normalizar partidas de cada título raíz independientemente
+            partidasActualizadas = prevPartidas.map(p => {
+              const tituloPadre = prevTitulos.find(t => t.id_titulo === p.id_titulo && t.id_titulo_padre === null);
+              if (tituloPadre && p.id_partida_padre === null) {
+                const partidasDelTitulo = prevPartidas
+                  .filter(part => part.id_titulo === p.id_titulo && part.id_partida_padre === null)
+                  .sort((a, b) => a.orden - b.orden);
+                const indice = partidasDelTitulo.findIndex(part => part.id_partida === p.id_partida);
+                if (indice !== -1) {
+                  return { ...p, orden: indice + 1 };
+                }
+              }
+              return p;
+            });
+          } else {
+            // Para otros padres: normalizar todos los items juntos (títulos + partidas)
+            titulosActualizados = prevTitulos.map(t => {
+              if (t.id_titulo_padre === idPadre) {
+                const indice = itemsMismoPadre.findIndex(item => item.id === t.id_titulo && item.tipo === 'TITULO');
+                if (indice !== -1) {
+                  return { ...t, orden: indice + 1 };
+                }
+              }
+              return t;
+            });
+            
+            partidasActualizadas = prevPartidas.map(p => {
+              if (p.id_titulo === idPadre && p.id_partida_padre === null) {
+                const indice = itemsMismoPadre.findIndex(item => item.id === p.id_partida && item.tipo === 'PARTIDA');
+                if (indice !== -1) {
+                  return { ...p, orden: indice + 1 };
+                }
+              }
+              return p;
+            });
+          }
+          
+          // Actualizar ambos estados
+          setTitulos(titulosActualizados);
+          return partidasActualizadas;
+        });
+
+        return prevTitulos;
+      });
+    }, 0);
   }, []);
 
   /**
@@ -792,10 +844,27 @@ export default function EstructuraPresupuestoEditor({
           nuevoIdPadre = tituloSeleccionado.id_titulo; // El título seleccionado será el padre
           nuevoNivel = tituloSeleccionado.nivel + 1; // Un nivel más profundo
 
-          // Obtener todos los hijos directos del título seleccionado (solo títulos hijos)
-          const hijosDirectos = titulos.filter(t => t.id_titulo_padre === tituloSeleccionado.id_titulo);
-          nuevoOrden = hijosDirectos.length > 0
-            ? Math.max(...hijosDirectos.map(t => t.orden)) + 1
+          // Calcular el orden: considerar todos los items del mismo padre (títulos hijos + partidas principales)
+          const itemsMismoPadre: Array<{ orden: number }> = [];
+          
+          // Títulos hijos del título seleccionado
+          const titulosHijos = titulos.filter(t => t.id_titulo_padre === tituloSeleccionado.id_titulo);
+          titulosHijos.forEach(t => itemsMismoPadre.push({ orden: t.orden }));
+          
+          // Partidas principales del título seleccionado
+          const partidasDelTitulo = partidas.filter(p => p.id_titulo === tituloSeleccionado.id_titulo && p.id_partida_padre === null);
+          partidasDelTitulo.forEach(p => itemsMismoPadre.push({ orden: p.orden }));
+          
+          console.log(`[handleCrearTitulo] Creando título hijo de "${tituloSeleccionado.descripcion}":`, {
+            id_padre: tituloSeleccionado.id_titulo,
+            titulosHijos: titulosHijos.map(t => ({ id: t.id_titulo, descripcion: t.descripcion, orden: t.orden })),
+            partidasDelTitulo: partidasDelTitulo.map(p => ({ id: p.id_partida, descripcion: p.descripcion, orden: p.orden })),
+            itemsMismoPadre: itemsMismoPadre.map(item => item.orden),
+            nuevoOrden: itemsMismoPadre.length > 0 ? Math.max(...itemsMismoPadre.map(item => item.orden)) + 1 : 1
+          });
+          
+          nuevoOrden = itemsMismoPadre.length > 0
+            ? Math.max(...itemsMismoPadre.map(item => item.orden)) + 1
             : 1;
         }
       } else {
@@ -810,18 +879,40 @@ export default function EstructuraPresupuestoEditor({
             nuevoNivel = tituloPadre.nivel + 1;
           }
 
-          // Obtener todos los hijos directos del título
-          const hijosDirectos = titulos.filter(t => t.id_titulo_padre === partidaSeleccionada.id_titulo);
-          nuevoOrden = hijosDirectos.length > 0
-            ? Math.max(...hijosDirectos.map(t => t.orden)) + 1
+          // Calcular el orden: considerar todos los items del mismo padre (títulos hijos + partidas principales)
+          const itemsMismoPadre: Array<{ orden: number }> = [];
+          
+          // Títulos hijos del título padre
+          const titulosHijos = titulos.filter(t => t.id_titulo_padre === partidaSeleccionada.id_titulo);
+          titulosHijos.forEach(t => itemsMismoPadre.push({ orden: t.orden }));
+          
+          // Partidas principales del título padre
+          const partidasDelTitulo = partidas.filter(p => p.id_titulo === partidaSeleccionada.id_titulo && p.id_partida_padre === null);
+          partidasDelTitulo.forEach(p => itemsMismoPadre.push({ orden: p.orden }));
+          
+          nuevoOrden = itemsMismoPadre.length > 0
+            ? Math.max(...itemsMismoPadre.map(item => item.orden)) + 1
             : 1;
         }
       }
     } else {
       // No hay item seleccionado: crear al final de los títulos raíz (sin padre)
+      // Obtener todos los items del mismo nivel (títulos raíz + partidas de títulos raíz)
+      const itemsMismoNivel: Array<{ orden: number }> = [];
+      
+      // Títulos raíz
       const titulosRaiz = titulos.filter(t => t.id_titulo_padre === null);
-      nuevoOrden = titulosRaiz.length > 0
-        ? Math.max(...titulosRaiz.map(t => t.orden)) + 1
+      titulosRaiz.forEach(t => itemsMismoNivel.push({ orden: t.orden }));
+      
+      // Partidas de títulos raíz (solo principales, sin id_partida_padre)
+      titulosRaiz.forEach(tituloRaiz => {
+        partidas
+          .filter(p => p.id_titulo === tituloRaiz.id_titulo && p.id_partida_padre === null)
+          .forEach(p => itemsMismoNivel.push({ orden: p.orden }));
+      });
+      
+      nuevoOrden = itemsMismoNivel.length > 0
+        ? Math.max(...itemsMismoNivel.map(item => item.orden)) + 1
         : 1;
     }
 
@@ -861,10 +952,27 @@ export default function EstructuraPresupuestoEditor({
         if (tituloSeleccionado) {
           nuevoNivel = 1;
 
-          // Obtener todas las partidas del título
+          // Calcular el orden: considerar todos los items del mismo título (títulos hijos + partidas principales)
+          const itemsMismoTitulo: Array<{ orden: number }> = [];
+          
+          // Títulos hijos del título seleccionado
+          const titulosHijos = titulos.filter(t => t.id_titulo_padre === nuevoIdTitulo);
+          titulosHijos.forEach(t => itemsMismoTitulo.push({ orden: t.orden }));
+          
+          // Partidas principales del título seleccionado
           const partidasDelTitulo = partidas.filter(p => p.id_titulo === nuevoIdTitulo && p.id_partida_padre === null);
-          nuevoOrden = partidasDelTitulo.length > 0
-            ? Math.max(...partidasDelTitulo.map(p => p.orden)) + 1
+          partidasDelTitulo.forEach(p => itemsMismoTitulo.push({ orden: p.orden }));
+          
+          console.log(`[handleCrearPartida] Creando partida en título "${tituloSeleccionado.descripcion}":`, {
+            id_titulo: nuevoIdTitulo,
+            titulosHijos: titulosHijos.map(t => ({ id: t.id_titulo, descripcion: t.descripcion, orden: t.orden })),
+            partidasDelTitulo: partidasDelTitulo.map(p => ({ id: p.id_partida, descripcion: p.descripcion, orden: p.orden })),
+            itemsMismoTitulo: itemsMismoTitulo.map(item => item.orden),
+            nuevoOrden: itemsMismoTitulo.length > 0 ? Math.max(...itemsMismoTitulo.map(item => item.orden)) + 1 : 1
+          });
+          
+          nuevoOrden = itemsMismoTitulo.length > 0
+            ? Math.max(...itemsMismoTitulo.map(item => item.orden)) + 1
             : 1;
         }
       } else {
@@ -886,9 +994,20 @@ export default function EstructuraPresupuestoEditor({
       const titulosRaiz = titulos.filter(t => t.id_titulo_padre === null).sort((a, b) => a.orden - b.orden);
       if (titulosRaiz.length > 0) {
         nuevoIdTitulo = titulosRaiz[0].id_titulo;
+        
+        // Calcular el orden: considerar todos los items del mismo título (títulos hijos + partidas principales)
+        const itemsMismoTitulo: Array<{ orden: number }> = [];
+        
+        // Títulos hijos del título raíz
+        const titulosHijos = titulos.filter(t => t.id_titulo_padre === nuevoIdTitulo);
+        titulosHijos.forEach(t => itemsMismoTitulo.push({ orden: t.orden }));
+        
+        // Partidas principales del título raíz
         const partidasDelTitulo = partidas.filter(p => p.id_titulo === nuevoIdTitulo && p.id_partida_padre === null);
-        nuevoOrden = partidasDelTitulo.length > 0
-          ? Math.max(...partidasDelTitulo.map(p => p.orden)) + 1
+        partidasDelTitulo.forEach(p => itemsMismoTitulo.push({ orden: p.orden }));
+        
+        nuevoOrden = itemsMismoTitulo.length > 0
+          ? Math.max(...itemsMismoTitulo.map(item => item.orden)) + 1
           : 1;
       }
     }
@@ -1115,10 +1234,30 @@ export default function EstructuraPresupuestoEditor({
       }
     }
 
-    // Obtener el orden máximo del nuevo padre para colocar al final
-    const itemsMismoPadre = obtenerItemsMismoPadre(idDestino);
-    const maxOrden = itemsMismoPadre.length > 0
-      ? Math.max(...itemsMismoPadre.map(item => item.orden))
+    // Obtener el orden máximo de los items del nuevo padre (títulos + partidas) para colocar al final
+    // IMPORTANTE: Excluir el item que se está moviendo del cálculo
+    const itemsNuevoPadre: Array<{ orden: number }> = [];
+    
+    if (nuevoIdPadre === null) {
+      // Items del nivel raíz (títulos raíz + partidas de títulos raíz)
+      const titulosRaiz = titulos.filter(t => t.id_titulo_padre === null && t.id_titulo !== itemCortado);
+      titulosRaiz.forEach(t => itemsNuevoPadre.push({ orden: t.orden }));
+      titulosRaiz.forEach(tituloRaiz => {
+        partidas
+          .filter(p => p.id_titulo === tituloRaiz.id_titulo && p.id_partida_padre === null && p.id_partida !== itemCortado)
+          .forEach(p => itemsNuevoPadre.push({ orden: p.orden }));
+      });
+    } else {
+      // Items del nuevo padre (títulos hijos + partidas principales)
+      // Excluir el item que se está moviendo
+      const titulosHijos = titulos.filter(t => t.id_titulo_padre === nuevoIdPadre && t.id_titulo !== itemCortado);
+      titulosHijos.forEach(t => itemsNuevoPadre.push({ orden: t.orden }));
+      const partidasDelPadre = partidas.filter(p => p.id_titulo === nuevoIdPadre && p.id_partida_padre === null && p.id_partida !== itemCortado);
+      partidasDelPadre.forEach(p => itemsNuevoPadre.push({ orden: p.orden }));
+    }
+    
+    const maxOrden = itemsNuevoPadre.length > 0
+      ? Math.max(...itemsNuevoPadre.map(item => item.orden))
       : 0;
     const nuevoOrden = maxOrden + 1;
 
@@ -1186,7 +1325,11 @@ export default function EstructuraPresupuestoEditor({
         }
       }, 10);
     } else {
+      // Es una partida
+      const partidaCortada = partidas.find(p => p.id_partida === itemCortado);
+      const idTituloOriginal = partidaCortada?.id_titulo || null;
       const idsBloque = obtenerIdsBloquePartida(itemCortado);
+      
       setPartidas(prev => prev.map(p => {
         if (p.id_partida === itemCortado) {
           return { ...p, id_titulo: nuevoIdPadre || p.id_titulo, orden: nuevoOrden };
@@ -1197,6 +1340,19 @@ export default function EstructuraPresupuestoEditor({
         }
         return p;
       }));
+      
+      // Normalizar órdenes del título original después de mover la partida
+      setTimeout(() => {
+        if (idTituloOriginal && idTituloOriginal !== nuevoIdPadre) {
+          const tituloOriginal = titulos.find(t => t.id_titulo === idTituloOriginal);
+          if (tituloOriginal) {
+            reordenarItemsPadre(tituloOriginal.id_titulo_padre);
+          }
+        }
+        if (nuevoIdPadre !== null) {
+          reordenarItemsPadre(nuevoIdPadre);
+        }
+      }, 10);
     }
 
     setItemCortado(null);
@@ -1273,6 +1429,7 @@ export default function EstructuraPresupuestoEditor({
         }));
       }
     }
+    // No normalizar después del intercambio - el intercambio ya está correcto
   }, [obtenerTipoItem, obtenerItemsMismoPadre]);
 
   /**
@@ -1349,6 +1506,7 @@ export default function EstructuraPresupuestoEditor({
         }));
       }
     }
+    // No normalizar después del intercambio - el intercambio ya está correcto
   }, [obtenerTipoItem, obtenerItemsMismoPadre]);
 
   /**
@@ -1434,12 +1592,46 @@ export default function EstructuraPresupuestoEditor({
         ? calcularNivelDinamico(nuevoIdPadre) + 1
         : 1;
 
-      // Obtener el orden máximo de los hermanos del padre actual
-      const itemsMismoPadre = obtenerItemsMismoPadre(padreActual.id_titulo);
-      const maxOrden = itemsMismoPadre.length > 0
-        ? Math.max(...itemsMismoPadre.map(item => item.orden))
-        : 0;
-      const nuevoOrden = maxOrden + 1;
+      // Calcular el nuevo orden basándose en los items del nuevo padre
+      // IMPORTANTE: Siempre considerar TODOS los hermanos juntos (títulos + partidas)
+      // Esto aplica tanto para root como para otros padres
+      let nuevoOrden = 1;
+
+      if (nuevoIdPadre === null) {
+        // Para el root, considerar TODOS los items: títulos raíz + partidas de títulos raíz
+        const itemsNuevoPadre: Array<{ orden: number }> = [];
+
+        // Títulos raíz (excluyendo el que se está moviendo)
+        const titulosRaiz = titulos.filter(t => t.id_titulo_padre === null && t.id_titulo !== id);
+        titulosRaiz.forEach(t => itemsNuevoPadre.push({ orden: t.orden }));
+
+        // Partidas de títulos raíz
+        titulosRaiz.forEach(tituloRaiz => {
+          const partidasRaiz = partidas.filter(p => p.id_titulo === tituloRaiz.id_titulo && p.id_partida_padre === null);
+          partidasRaiz.forEach(p => itemsNuevoPadre.push({ orden: p.orden }));
+        });
+
+        // Calcular el orden máximo y asignar el siguiente
+        const maxOrden = itemsNuevoPadre.length > 0
+          ? Math.max(...itemsNuevoPadre.map(item => item.orden))
+          : 0;
+        nuevoOrden = maxOrden + 1;
+      } else {
+        // Items del nuevo padre (títulos hijos + partidas principales)
+        // IMPORTANTE: Excluir el título que se está moviendo
+        const itemsNuevoPadre: Array<{ orden: number }> = [];
+        const titulosHijos = titulos.filter(t => t.id_titulo_padre === nuevoIdPadre && t.id_titulo !== id);
+        titulosHijos.forEach(t => itemsNuevoPadre.push({ orden: t.orden }));
+
+        const partidasDelPadre = partidas.filter(p => p.id_titulo === nuevoIdPadre && p.id_partida_padre === null);
+        partidasDelPadre.forEach(p => itemsNuevoPadre.push({ orden: p.orden }));
+
+        // Calcular el orden máximo y asignar el siguiente
+        const maxOrden = itemsNuevoPadre.length > 0
+          ? Math.max(...itemsNuevoPadre.map(item => item.orden))
+          : 0;
+        nuevoOrden = maxOrden + 1;
+      }
 
       // Actualizar el título
       setTitulos(prev => {
@@ -1468,13 +1660,25 @@ export default function EstructuraPresupuestoEditor({
         return actualizados;
       });
 
-      // Reordenar items del padre original
+      // Reordenar items del padre original y del nuevo padre (si es raíz, normalizar también)
+      // IMPORTANTE: Reordenar primero el padre original para normalizar los items que quedan,
+      // luego reordenar el nuevo padre (que incluirá el item movido)
       setTimeout(() => {
+        // Primero reordenar el padre original para normalizar los items que quedan
         reordenarItemsPadre(titulo.id_titulo_padre);
-        if (nuevoIdPadre !== null) {
-          reordenarItemsPadre(nuevoIdPadre);
-        }
-      }, 10);
+        // Luego reordenar el nuevo padre (esto incluirá el item movido y lo colocará en la posición correcta)
+        // Usar un segundo setTimeout para asegurar que el reordenamiento del padre original se complete primero
+        setTimeout(() => {
+          if (nuevoIdPadre !== null) {
+            reordenarItemsPadre(nuevoIdPadre);
+          } else {
+            // Si se movió a la raíz, normalizar los órdenes del nivel raíz
+            // Esto reordenará todos los items del root, incluyendo el que se acaba de mover
+            // y los ordenará correctamente basándose en sus órdenes actuales
+            reordenarItemsPadre(null);
+          }
+        }, 100);
+      }, 50);
     } else {
       // Es una partida
       const partida = partidas.find(p => p.id_partida === id);
@@ -1486,14 +1690,23 @@ export default function EstructuraPresupuestoEditor({
         const partidaPadre = partidas.find(p => p.id_partida === partida.id_partida_padre);
         if (!partidaPadre) return;
 
-        // Obtener el orden máximo de las partidas del título
+        // Obtener el orden máximo de los items del título (títulos hijos + partidas principales)
+        // IMPORTANTE: Excluir la partida que se está moviendo
+        const itemsMismoTitulo: Array<{ orden: number }> = [];
+        const titulosHijos = titulos.filter(t => t.id_titulo_padre === partidaPadre.id_titulo);
+        titulosHijos.forEach(t => itemsMismoTitulo.push({ orden: t.orden }));
         const partidasDelTitulo = partidas.filter(
-          p => p.id_titulo === partidaPadre.id_titulo && p.id_partida_padre === null
+          p => p.id_titulo === partidaPadre.id_titulo && p.id_partida_padre === null && p.id_partida !== id
         );
-        const maxOrden = partidasDelTitulo.length > 0
-          ? Math.max(...partidasDelTitulo.map(p => p.orden))
+        partidasDelTitulo.forEach(p => itemsMismoTitulo.push({ orden: p.orden }));
+        
+        const maxOrden = itemsMismoTitulo.length > 0
+          ? Math.max(...itemsMismoTitulo.map(item => item.orden))
           : 0;
         const nuevoOrden = maxOrden + 1;
+
+        // Guardar el título original antes de actualizar
+        const idTituloOriginal = partida.id_titulo;
 
         setPartidas(prev => prev.map(p => {
           if (p.id_partida === id) {
@@ -1507,6 +1720,14 @@ export default function EstructuraPresupuestoEditor({
           }
           return p;
         }));
+
+        // Reordenar items del título original y del nuevo título
+        setTimeout(() => {
+          if (idTituloOriginal && idTituloOriginal !== partidaPadre.id_titulo) {
+            reordenarItemsPadre(idTituloOriginal);
+          }
+          reordenarItemsPadre(partidaPadre.id_titulo);
+        }, 50);
       } else {
         // Es una partida principal: moverla al título padre del título actual
         const tituloActual = titulos.find(t => t.id_titulo === partida.id_titulo);
@@ -1516,14 +1737,23 @@ export default function EstructuraPresupuestoEditor({
         const tituloAbuelo = titulos.find(t => t.id_titulo === tituloActual.id_titulo_padre);
         if (!tituloAbuelo) return;
 
-        // Obtener el orden máximo de las partidas del título abuelo
+        // Obtener el orden máximo de los items del título abuelo (títulos hijos + partidas principales)
+        // IMPORTANTE: Excluir la partida que se está moviendo
+        const itemsMismoTitulo: Array<{ orden: number }> = [];
+        const titulosHijos = titulos.filter(t => t.id_titulo_padre === tituloAbuelo.id_titulo);
+        titulosHijos.forEach(t => itemsMismoTitulo.push({ orden: t.orden }));
         const partidasDelTitulo = partidas.filter(
-          p => p.id_titulo === tituloAbuelo.id_titulo && p.id_partida_padre === null
+          p => p.id_titulo === tituloAbuelo.id_titulo && p.id_partida_padre === null && p.id_partida !== id
         );
-        const maxOrden = partidasDelTitulo.length > 0
-          ? Math.max(...partidasDelTitulo.map(p => p.orden))
+        partidasDelTitulo.forEach(p => itemsMismoTitulo.push({ orden: p.orden }));
+        
+        const maxOrden = itemsMismoTitulo.length > 0
+          ? Math.max(...itemsMismoTitulo.map(item => item.orden))
           : 0;
         const nuevoOrden = maxOrden + 1;
+
+        // Guardar el título original antes de actualizar
+        const idTituloOriginal = partida.id_titulo;
 
         setPartidas(prev => prev.map(p => {
           if (p.id_partida === id) {
@@ -1531,6 +1761,14 @@ export default function EstructuraPresupuestoEditor({
           }
           return p;
         }));
+
+        // Reordenar items del título original y del nuevo título
+        setTimeout(() => {
+          if (idTituloOriginal && idTituloOriginal !== tituloAbuelo.id_titulo) {
+            reordenarItemsPadre(idTituloOriginal);
+          }
+          reordenarItemsPadre(tituloAbuelo.id_titulo);
+        }, 50);
       }
     }
   }, [titulos, partidas, obtenerTipoItem, puedeMoverIzquierda, calcularNivelDinamico, obtenerItemsMismoPadre, reordenarItemsPadre]);
@@ -1556,10 +1794,15 @@ export default function EstructuraPresupuestoEditor({
       const nuevoIdPadre = hermanoAnterior.id;
       const nuevoNivel = calcularNivelDinamico(nuevoIdPadre) + 1;
 
-      // Obtener el orden máximo de los hijos del hermano anterior
-      const hijosDelHermano = titulos.filter(t => t.id_titulo_padre === nuevoIdPadre);
-      const maxOrden = hijosDelHermano.length > 0
-        ? Math.max(...hijosDelHermano.map(t => t.orden))
+      // Obtener el orden máximo de los items del hermano anterior (títulos hijos + partidas principales)
+      const itemsMismoPadre: Array<{ orden: number }> = [];
+      const titulosHijos = titulos.filter(t => t.id_titulo_padre === nuevoIdPadre);
+      titulosHijos.forEach(t => itemsMismoPadre.push({ orden: t.orden }));
+      const partidasDelPadre = partidas.filter(p => p.id_titulo === nuevoIdPadre && p.id_partida_padre === null);
+      partidasDelPadre.forEach(p => itemsMismoPadre.push({ orden: p.orden }));
+      
+      const maxOrden = itemsMismoPadre.length > 0
+        ? Math.max(...itemsMismoPadre.map(item => item.orden))
         : 0;
       const nuevoOrden = maxOrden + 1;
 
@@ -1608,12 +1851,17 @@ export default function EstructuraPresupuestoEditor({
       const partidaActual = partidas.find(p => p.id_partida === id);
       const idTituloOriginal = partidaActual?.id_titulo || null;
 
-      // Obtener el orden máximo de las partidas del título hermano anterior
+      // Obtener el orden máximo de los items del título hermano anterior (títulos hijos + partidas principales)
+      const itemsMismoTitulo: Array<{ orden: number }> = [];
+      const titulosHijos = titulos.filter(t => t.id_titulo_padre === nuevoIdTitulo);
+      titulosHijos.forEach(t => itemsMismoTitulo.push({ orden: t.orden }));
       const partidasDelTitulo = partidas.filter(
         p => p.id_titulo === nuevoIdTitulo && p.id_partida_padre === null
       );
-      const maxOrden = partidasDelTitulo.length > 0
-        ? Math.max(...partidasDelTitulo.map(p => p.orden))
+      partidasDelTitulo.forEach(p => itemsMismoTitulo.push({ orden: p.orden }));
+      
+      const maxOrden = itemsMismoTitulo.length > 0
+        ? Math.max(...itemsMismoTitulo.map(item => item.orden))
         : 0;
       const nuevoOrden = maxOrden + 1;
 
@@ -1880,19 +2128,22 @@ export default function EstructuraPresupuestoEditor({
       });
 
       // 3. Preparar títulos a actualizar
-      // ⚠️ NO actualizamos numero_item - se calcula dinámicamente en frontend basado en orden/nivel/padre
       const titulosActualizar = titulos
         .filter(t => !t.id_titulo.startsWith('temp_'))
         .map(titulo => {
           const original = titulosOriginales.find(t => t.id_titulo === titulo.id_titulo);
           if (!original) return null;
 
+          // Calcular numero_item dinámicamente basado en la posición jerárquica actual
+          const numeroItemCalculado = calcularNumeroItem(titulo, 'TITULO');
+
           const cambios: any = { id_titulo: titulo.id_titulo };
           if (titulo.descripcion !== original.descripcion) cambios.descripcion = titulo.descripcion;
           if (titulo.id_titulo_padre !== original.id_titulo_padre) cambios.id_titulo_padre = titulo.id_titulo_padre;
           if (titulo.orden !== original.orden) cambios.orden = titulo.orden;
           if (titulo.nivel !== original.nivel) cambios.nivel = titulo.nivel;
-          // numero_item NO se actualiza - se calcula dinámicamente en frontend
+          // Actualizar numero_item si cambió (se calcula dinámicamente en frontend)
+          if (numeroItemCalculado !== original.numero_item) cambios.numero_item = numeroItemCalculado;
           if (titulo.tipo !== original.tipo) cambios.tipo = titulo.tipo;
           // total_parcial ya no se envía, se calcula en frontend
 
@@ -1914,12 +2165,14 @@ export default function EstructuraPresupuestoEditor({
         .filter((t): t is NonNullable<typeof t> => t !== null);
 
       // 4. Preparar partidas a actualizar
-      // ⚠️ NO actualizamos numero_item - se calcula dinámicamente en frontend basado en orden/nivel/padre
       const partidasActualizar = partidas
         .filter(p => !p.id_partida.startsWith('temp_'))
         .map(partida => {
           const original = partidasOriginales.find(p => p.id_partida === partida.id_partida);
           if (!original) return null;
+
+          // Calcular numero_item dinámicamente basado en la posición jerárquica actual
+          const numeroItemCalculado = calcularNumeroItem(partida, 'PARTIDA');
 
           const cambios: any = { id_partida: partida.id_partida };
           if (partida.descripcion !== original.descripcion) cambios.descripcion = partida.descripcion;
@@ -1930,7 +2183,8 @@ export default function EstructuraPresupuestoEditor({
           if (partida.precio_unitario !== original.precio_unitario) cambios.precio_unitario = partida.precio_unitario;
           if (partida.unidad_medida !== original.unidad_medida) cambios.unidad_medida = partida.unidad_medida;
           if (partida.nivel_partida !== original.nivel_partida) cambios.nivel_partida = partida.nivel_partida;
-          // numero_item NO se actualiza - se calcula dinámicamente en frontend
+          // Actualizar numero_item si cambió (se calcula dinámicamente en frontend)
+          if (numeroItemCalculado !== original.numero_item) cambios.numero_item = numeroItemCalculado;
           if (partida.estado !== original.estado) cambios.estado = partida.estado;
           // parcial_partida ya no se envía, se calcula en frontend
 
