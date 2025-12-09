@@ -70,6 +70,7 @@ export const UPDATE_PRESUPUESTO_MUTATION = `
     $plazo: Int
     $ppto_base: Float
     $ppto_oferta: Float
+    $parcial_presupuesto: Float
     $total_presupuesto: Float
   ) {
     updatePresupuesto(
@@ -85,6 +86,7 @@ export const UPDATE_PRESUPUESTO_MUTATION = `
       plazo: $plazo
       ppto_base: $ppto_base
       ppto_oferta: $ppto_oferta
+      parcial_presupuesto: $parcial_presupuesto
       total_presupuesto: $total_presupuesto
     ) {
       _id

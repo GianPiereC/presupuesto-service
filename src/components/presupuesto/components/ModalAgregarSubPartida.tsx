@@ -10,6 +10,7 @@ import AutocompleteRecurso from './AutocompleteRecurso';
 import { useApuByPartida, type TipoRecursoApu } from '@/hooks/useAPU';
 import { Partida } from '@/hooks/usePartidas';
 import { Recurso } from '@/hooks/useRecursos';
+import { type APUEstructura } from '@/hooks/usePresupuestos';
 import { mapearTipoCostoRecursoATipoApu } from '@/utils/tipoRecursoMapper';
 import { executeQuery } from '@/services/graphql-client';
 import { GET_PRECIO_RECURSO_BY_PRESUPUESTO_Y_RECURSO } from '@/graphql/queries';
@@ -22,6 +23,7 @@ interface ModalAgregarSubPartidaProps {
   id_presupuesto?: string;
   id_proyecto?: string;
   id_partida_padre?: string | null;
+  apusCalculados?: APUEstructura[] | null; // NUEVO: APUs calculados del frontend (para precios compartidos actualizados)
   onAgregarSubPartida?: (subPartida: PartidaLocal) => void;
   subPartidaParaEditar?: { id: string; recursos: any[]; idPartidaOriginal?: string | null; rendimiento?: number; jornada?: number; descripcion?: string } | null;
   onActualizarSubPartida?: (idSubPartida: string, subPartida: PartidaLocal) => void;
@@ -58,6 +60,8 @@ interface RecursoAPUEditable {
   unidad_medida: string;
   id_precio_recurso: string | null;
   precio: number;
+  tiene_precio_override?: boolean;
+  precio_override?: number;
   cuadrilla?: number;
   cantidad: number;
   desperdicio_porcentaje?: number;
@@ -65,6 +69,8 @@ interface RecursoAPUEditable {
   orden: number;
   enEdicion?: boolean;
   esNuevo?: boolean;
+  esSubpartida?: boolean;
+  precio_unitario_subpartida?: number;
 }
 
 export default function ModalAgregarSubPartida({
@@ -74,6 +80,7 @@ export default function ModalAgregarSubPartida({
   id_presupuesto,
   id_proyecto,
   id_partida_padre,
+  apusCalculados,
   onAgregarSubPartida,
   subPartidaParaEditar,
   onActualizarSubPartida,
@@ -167,120 +174,156 @@ export default function ModalAgregarSubPartida({
         }
       }
       
-      // PRIORIDAD: Usar datos locales si existen (incluyen cambios recientes sin guardar)
-      // Solo cargar desde backend si NO hay datos locales
+      // PRIORIDAD: Siempre usar apusCalculados (datos calculados del frontend con precios compartidos actualizados)
+      // NO usar datos locales porque pueden tener precios desactualizados
       const cargarDatos = async () => {
-        // Si hay recursos en subPartidaParaEditar, usar esos (datos locales actualizados)
-        if (subPartidaParaEditar.recursos && subPartidaParaEditar.recursos.length > 0) {
-          // Usar los datos locales (que incluyen los cambios recientes)
-          const rendimientoGuardado = (subPartidaParaEditar as any).rendimiento || 1.0;
-          const jornadaGuardada = (subPartidaParaEditar as any).jornada || 8;
-          
-          setRendimiento(rendimientoGuardado);
-          setJornada(jornadaGuardada);
-          setRendimientoInput(String(rendimientoGuardado));
-          setJornadaInput(String(jornadaGuardada));
-          
-          const recursosEditable: RecursoAPUEditable[] = subPartidaParaEditar.recursos.map((r, index) => {
-            const precioSincronizado = r.recurso_id ? precioSync.obtenerPrecio(r.recurso_id) : undefined;
-            const precioFinal = precioSincronizado !== undefined ? precioSincronizado : (r.precio || 0);
+        console.log(`[ModalAgregarSubPartida] 🔍 Cargando datos para subpartida:`, {
+          id: subPartidaParaEditar.id,
+          esTempId: subPartidaParaEditar.id?.startsWith('temp_'),
+          tieneApusCalculados: !!apusCalculados,
+          cantidadApus: apusCalculados?.length || 0,
+          tieneRecursosLocales: !!(subPartidaParaEditar.recursos && subPartidaParaEditar.recursos.length > 0),
+        });
+        
+        // SOLO si es temp_id, usar datos locales (aún no existe en backend)
+        // Para subpartidas reales, SIEMPRE ignorar datos locales y usar apusCalculados
+        if (subPartidaParaEditar.id && subPartidaParaEditar.id.startsWith('temp_')) {
+          console.log(`[ModalAgregarSubPartida] 📝 Usando datos locales (temp_id): ${subPartidaParaEditar.id}`);
+          if (subPartidaParaEditar.recursos && subPartidaParaEditar.recursos.length > 0) {
+            const rendimientoGuardado = (subPartidaParaEditar as any).rendimiento || 1.0;
+            const jornadaGuardada = (subPartidaParaEditar as any).jornada || 8;
             
-            const recurso: RecursoAPUEditable = {
-              id_recurso_apu: r.id_recurso_apu || `temp-${index}`,
-              recurso_id: r.recurso_id || '',
-              codigo_recurso: r.codigo_recurso || '',
-              descripcion: r.descripcion || '',
-              tipo_recurso: r.tipo_recurso || 'MATERIAL',
-              unidad_medida: r.unidad_medida || '',
-              id_precio_recurso: r.id_precio_recurso || null,
-              precio: precioFinal,
-              cuadrilla: r.cuadrilla,
-              cantidad: r.cantidad || 0,
-              desperdicio_porcentaje: r.desperdicio_porcentaje || 0,
-              parcial: 0, // Se calculará después
-              orden: r.orden || index,
-              esNuevo: false,
-            };
+            setRendimiento(rendimientoGuardado);
+            setJornada(jornadaGuardada);
+            setRendimientoInput(String(rendimientoGuardado));
+            setJornadaInput(String(jornadaGuardada));
             
-            recurso.parcial = calcularParcial(recurso);
-            return recurso;
-          });
-          
-          setRecursosEditables(recursosEditable);
-          
-          setValoresOriginales({
-            rendimiento: rendimientoGuardado,
-            jornada: jornadaGuardada,
-            recursos: JSON.parse(JSON.stringify(recursosEditable)),
-          });
-          setHasChanges(false);
-          return; // Salir temprano, usar datos locales
+            const recursosEditable: RecursoAPUEditable[] = subPartidaParaEditar.recursos.map((r, index) => {
+              const recurso: RecursoAPUEditable = {
+                id_recurso_apu: r.id_recurso_apu || `temp-${index}`,
+                recurso_id: r.recurso_id || '',
+                codigo_recurso: r.codigo_recurso || '',
+                descripcion: r.descripcion || '',
+                tipo_recurso: r.tipo_recurso || 'MATERIAL',
+                unidad_medida: r.unidad_medida || '',
+                id_precio_recurso: r.id_precio_recurso || null,
+                precio: r.precio || 0,
+                tiene_precio_override: r.tiene_precio_override || false,
+                precio_override: r.precio_override,
+                cuadrilla: r.cuadrilla,
+                cantidad: r.cantidad || 0,
+                desperdicio_porcentaje: r.desperdicio_porcentaje || 0,
+                parcial: 0,
+                orden: r.orden || index,
+                esNuevo: false,
+              };
+              
+              recurso.parcial = calcularParcial(recurso);
+              return recurso;
+            });
+            
+            setRecursosEditables(recursosEditable);
+            setValoresOriginales({
+              rendimiento: rendimientoGuardado,
+              jornada: jornadaGuardada,
+              recursos: JSON.parse(JSON.stringify(recursosEditable)),
+            });
+            setHasChanges(false);
+            return;
+          }
         }
         
-        // Solo si NO hay datos locales, cargar desde el backend
+        // Para subpartidas reales, SIEMPRE usar apusCalculados (IGNORAR datos locales completamente)
         if (subPartidaParaEditar.id && !subPartidaParaEditar.id.startsWith('temp_')) {
-          try {
-            const { GET_APU_BY_PARTIDA_QUERY } = await import('@/graphql/queries/apu.queries');
-            const subpartidaApuResponse = await executeQuery<{ getApuByPartida: any }>(
-              GET_APU_BY_PARTIDA_QUERY,
-              { id_partida: subPartidaParaEditar.id }
-            );
+          console.log(`[ModalAgregarSubPartida] 🔄 Buscando en apusCalculados (IGNORANDO datos locales): ${subPartidaParaEditar.id}`);
+          
+          if (!apusCalculados || apusCalculados.length === 0) {
+            console.warn(`[ModalAgregarSubPartida] ⚠️ No hay apusCalculados disponibles`);
+            return;
+          }
+          
+          // Buscar en apusCalculados usando el ID de la subpartida
+          const apuSubpartidaCalculado = apusCalculados.find(apu => apu.id_partida === subPartidaParaEditar.id);
+          
+          if (apuSubpartidaCalculado) {
+            console.log(`[ModalAgregarSubPartida] ✅ APU encontrado en apusCalculados:`, {
+              id_partida: apuSubpartidaCalculado.id_partida,
+              recursosCount: apuSubpartidaCalculado.recursos?.length || 0,
+              rendimiento: apuSubpartidaCalculado.rendimiento,
+              jornada: apuSubpartidaCalculado.jornada,
+            });
             
-            if (subpartidaApuResponse?.getApuByPartida) {
-              const subpartidaApu = subpartidaApuResponse.getApuByPartida;
-              
-              const partidaSubpartida = partidas.find(p => p.id_partida === subPartidaParaEditar.id);
-              if (partidaSubpartida && partidaSubpartida.descripcion) {
-                setDescripcionSubpartida(partidaSubpartida.descripcion);
-              } else if (subPartidaParaEditar.descripcion) {
-                setDescripcionSubpartida(subPartidaParaEditar.descripcion);
-              }
-              
-              const rendimientoBackend = subpartidaApu.rendimiento || 1.0;
-              const jornadaBackend = subpartidaApu.jornada || 8;
-              
-              setRendimiento(rendimientoBackend);
-              setJornada(jornadaBackend);
-              setRendimientoInput(String(rendimientoBackend));
-              setJornadaInput(String(jornadaBackend));
-              
-              const recursosEditable: RecursoAPUEditable[] = (subpartidaApu.recursos || []).map((r: any, index: number) => {
-                const precioSincronizado = r.recurso_id ? precioSync.obtenerPrecio(r.recurso_id) : undefined;
-                const precioFinal = precioSincronizado !== undefined ? precioSincronizado : (r.precio || 0);
-                
-                const recurso: RecursoAPUEditable = {
-                  id_recurso_apu: r.id_recurso_apu,
-                  recurso_id: r.recurso_id || '',
-                  codigo_recurso: r.codigo_recurso || '',
-                  descripcion: r.descripcion || '',
-                  tipo_recurso: r.tipo_recurso || 'MATERIAL',
-                  unidad_medida: r.unidad_medida || '',
-                  id_precio_recurso: r.id_precio_recurso || null,
-                  precio: precioFinal,
-                  cuadrilla: r.cuadrilla,
-                  cantidad: r.cantidad || 0,
-                  desperdicio_porcentaje: r.desperdicio_porcentaje || 0,
-                  parcial: 0,
-                  orden: r.orden || index,
-                  esNuevo: false,
-                };
-                
-                recurso.parcial = calcularParcial(recurso);
-                return recurso;
+            // Mostrar precios de los recursos para debugging
+            if (apuSubpartidaCalculado.recursos) {
+              apuSubpartidaCalculado.recursos.forEach((r, idx) => {
+                console.log(`[ModalAgregarSubPartida] 📊 Recurso ${idx + 1}:`, {
+                  descripcion: r.descripcion,
+                  precio: r.precio,
+                  cantidad: r.cantidad,
+                  parcial: r.parcial,
+                  tiene_precio_override: r.tiene_precio_override,
+                  id_precio_recurso: r.id_precio_recurso,
+                });
               });
-              
-              setRecursosEditables(recursosEditable);
-              
-              setValoresOriginales({
-                rendimiento: rendimientoBackend,
-                jornada: jornadaBackend,
-                recursos: JSON.parse(JSON.stringify(recursosEditable)),
-              });
-              setHasChanges(false);
-              return;
             }
-          } catch (error) {
-            // Error silencioso al cargar datos desde backend
+            
+            const partidaSubpartida = partidas.find(p => p.id_partida === subPartidaParaEditar.id);
+            if (partidaSubpartida && partidaSubpartida.descripcion) {
+              setDescripcionSubpartida(partidaSubpartida.descripcion);
+            } else if (subPartidaParaEditar.descripcion) {
+              setDescripcionSubpartida(subPartidaParaEditar.descripcion);
+            }
+            
+            const rendimientoBackend = apuSubpartidaCalculado.rendimiento || 1.0;
+            const jornadaBackend = apuSubpartidaCalculado.jornada || 8;
+            
+            setRendimiento(rendimientoBackend);
+            setJornada(jornadaBackend);
+            setRendimientoInput(String(rendimientoBackend));
+            setJornadaInput(String(jornadaBackend));
+            
+            const recursosEditable: RecursoAPUEditable[] = (apuSubpartidaCalculado.recursos || []).map((r: any, index: number) => {
+              // Siempre usar el precio que viene de apusCalculados (ya está calculado con precios compartidos actualizados)
+              // NO usar precioSync porque apusCalculados ya tiene los precios correctos
+              const precioFinal = r.precio || 0;
+              
+              const recurso: RecursoAPUEditable = {
+                id_recurso_apu: r.id_recurso_apu,
+                recurso_id: r.recurso_id || '',
+                codigo_recurso: r.codigo_recurso || '',
+                descripcion: r.descripcion || '',
+                tipo_recurso: r.tipo_recurso || 'MATERIAL',
+                unidad_medida: r.unidad_medida || '',
+                id_precio_recurso: r.id_precio_recurso || null,
+                precio: precioFinal,
+                tiene_precio_override: r.tiene_precio_override || false,
+                precio_override: r.precio_override,
+                cuadrilla: r.cuadrilla,
+                cantidad: r.cantidad || 0,
+                desperdicio_porcentaje: r.desperdicio_porcentaje || 0,
+                parcial: 0,
+                orden: r.orden || index,
+                esNuevo: false,
+              };
+              
+              recurso.parcial = calcularParcial(recurso);
+              return recurso;
+            });
+            
+            setRecursosEditables(recursosEditable);
+            
+            setValoresOriginales({
+              rendimiento: rendimientoBackend,
+              jornada: jornadaBackend,
+              recursos: JSON.parse(JSON.stringify(recursosEditable)),
+            });
+            setHasChanges(false);
+            return;
+          } else {
+            console.warn(`[ModalAgregarSubPartida] ⚠️ APU de subpartida NO encontrado en apusCalculados:`, {
+              idBuscado: subPartidaParaEditar.id,
+              idsDisponibles: apusCalculados.map(apu => apu.id_partida).slice(0, 5),
+            });
           }
         }
         
@@ -637,7 +680,7 @@ export default function ModalAgregarSubPartida({
   const handleUpdateRecurso = (
     recursoId: string,
     campo: keyof RecursoAPUEditable,
-    valor: string | number | null
+    valor: string | number | boolean | null
   ) => {
     setRecursosEditables((prev) => {
       const sumaHHManoObra = prev
@@ -653,6 +696,12 @@ export default function ModalAgregarSubPartida({
       return prev
         .map((r) => {
           if (r.id_recurso_apu === recursoId) {
+            // Manejar valores booleanos directamente
+            if (typeof valor === 'boolean') {
+              const nuevoRecurso = { ...r, [campo]: valor };
+              nuevoRecurso.parcial = calcularParcial(nuevoRecurso);
+              return nuevoRecurso;
+            }
             const numValor = typeof valor === 'string' ? parseFloat(valor) || 0 : valor || 0;
             const nuevoRecurso = { ...r };
 
@@ -1003,7 +1052,7 @@ export default function ModalAgregarSubPartida({
           <div className="flex-shrink-0 border-b border-[var(--border-color)] bg-[var(--card-bg)] relative z-0 table-header-shadow">
             {/* Datos de Partida */}
             <div className="px-2 py-1.5 border-b border-[var(--border-color)]">
-              <div className="flex items-center gap-3 flex-wrap text-[10px]">
+              <div className="flex items-center gap-3 flex-wrap text-xs">
                 <div className="flex items-center gap-1 flex-1">
                   <span className="text-[var(--text-secondary)] whitespace-nowrap">Partida:</span>
                   {!subPartidaParaEditar && !esModoLectura ? (
@@ -1015,145 +1064,188 @@ export default function ModalAgregarSubPartida({
                         setHasChanges(true);
                       }}
                       placeholder="Descripción de la subpartida"
-                      className="text-[10px] h-6 flex-1 font-medium"
+                      className="text-xs h-6 flex-1 font-medium"
                     />
                   ) : (
-                    <span className="ml-1 font-medium text-[var(--text-primary)]">
-                      {subPartidaParaEditar ? partidaSeleccionada.descripcion : descripcionSubpartida || partidaSeleccionada.descripcion}
-                    </span>
+                    <Input
+                      type="text"
+                      value={subPartidaParaEditar ? partidaSeleccionada.descripcion : descripcionSubpartida || partidaSeleccionada.descripcion}
+                      disabled
+                      className="text-xs h-6 flex-1 font-medium"
+                    />
                   )}
                 </div>
                 <div className="flex items-center">
                   <span className="text-[var(--text-secondary)]">Item:</span>
-                  <span className="ml-1 font-mono text-[var(--text-primary)]">
-                    {partidaSeleccionada.numero_item}
-                  </span>
+                  <Input
+                    type="text"
+                    value={partidaSeleccionada.numero_item}
+                    disabled
+                    placeholder="---"
+                    className="text-xs h-6 w-20 text-center px-1 ml-1 font-mono"
+                  />
                 </div>
                 <div className="flex items-center gap-1">
                   <span className="text-[var(--text-secondary)]">Unidad:</span>
-                  <span className="ml-1 text-[var(--text-primary)]">
-                    {partidaSeleccionada.unidad_medida}
-                  </span>
+                  <Input
+                    type="text"
+                    value={partidaSeleccionada.unidad_medida}
+                    disabled
+                    placeholder="---"
+                    className="text-xs h-6 w-16 text-center px-1"
+                  />
                 </div>
                 <div className="flex items-center gap-1">
                   <span className="text-[var(--text-secondary)]">Metrado:</span>
-                  <span className="ml-1 text-[var(--text-primary)]">
-                    {partidaSeleccionada.metrado.toLocaleString('es-PE', {
+                  <Input
+                    type="text"
+                    value={partidaSeleccionada.metrado.toLocaleString('es-PE', {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
                     })}
-                  </span>
+                    disabled
+                    placeholder="0.00"
+                    className="text-xs h-6 w-16 text-center px-1"
+                  />
                 </div>
                 <div className="flex items-center">
                   <span className="text-[var(--text-secondary)]">Estado:</span>
-                  <span
-                    className={`ml-1 font-medium ${
+                  <Input
+                    type="text"
+                    value={partidaSeleccionada.estado}
+                    disabled
+                    placeholder="---"
+                    className={`text-xs h-6 w-20 text-center px-1 ml-1 ${
                       partidaSeleccionada.estado === 'Activa' ? 'text-green-600' : 'text-gray-500'
                     }`}
-                  >
-                    {partidaSeleccionada.estado}
-                  </span>
+                  />
                 </div>
               </div>
             </div>
 
             {/* Datos de APU - Rendimiento y Jornada */}
             <div className="px-2 py-1.5 border-b border-[var(--border-color)]">
-              <div className="grid grid-cols-4 gap-2 text-[10px]">
+              <div className="grid grid-cols-4 gap-2 text-xs">
                 <div className="flex items-center gap-1">
                   <span className="text-[var(--text-secondary)]">Rendimiento:</span>
-                  <Input
-                    type="number"
-                    step="0.0001"
-                    min="0"
-                    value={rendimientoInput}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setRendimientoInput(value);
-                      if (value === '' || value === '-') {
-                        return;
-                      }
-                      const numValue = parseFloat(value);
-                      if (!isNaN(numValue) && numValue >= 0) {
-                        setRendimiento(truncateToFour(numValue));
-                        if (valoresOriginales) {
-                          setHasChanges(true);
+                  {!esModoLectura ? (
+                    <Input
+                      type="number"
+                      step="0.0001"
+                      min="0"
+                      value={rendimientoInput}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setRendimientoInput(value);
+                        if (value === '' || value === '-') {
+                          return;
                         }
-                      }
-                    }}
-                    onBlur={(e) => {
-                      const value = e.target.value;
-                      if (value === '' || value === '-') {
-                        setRendimientoInput('1.0000');
-                        setRendimiento(1.0);
-                        return;
-                      }
-                      const numValue = parseFloat(value);
-                      if (isNaN(numValue) || numValue < 0) {
-                        setRendimientoInput(rendimiento.toFixed(4));
-                      } else {
-                        const truncated = truncateToFour(numValue);
-                        setRendimientoInput(truncated.toFixed(4));
-                        setRendimiento(truncated);
-                      }
-                    }}
-                    disabled={esModoLectura}
-                    className="text-[10px] h-6 w-16 text-center px-1"
-                  />
+                        const numValue = parseFloat(value);
+                        if (!isNaN(numValue) && numValue >= 0) {
+                          setRendimiento(truncateToFour(numValue));
+                          if (valoresOriginales) {
+                            setHasChanges(true);
+                          }
+                        }
+                      }}
+                      onBlur={(e) => {
+                        const value = e.target.value;
+                        if (value === '' || value === '-') {
+                          setRendimientoInput('1.0000');
+                          setRendimiento(1.0);
+                          return;
+                        }
+                        const numValue = parseFloat(value);
+                        if (isNaN(numValue) || numValue < 0) {
+                          setRendimientoInput(rendimiento.toFixed(4));
+                        } else {
+                          const truncated = truncateToFour(numValue);
+                          setRendimientoInput(truncated.toFixed(4));
+                          setRendimiento(truncated);
+                        }
+                      }}
+                      className="text-xs h-6 w-16 text-center px-1"
+                    />
+                  ) : (
+                    <Input
+                      type="text"
+                      value={rendimiento.toFixed(4)}
+                      disabled
+                      placeholder="1.0000"
+                      className="text-xs h-6 w-16 text-center px-1"
+                    />
+                  )}
                 </div>
                 <div className="flex items-center gap-1">
                   <span className="text-[var(--text-secondary)]">Jornada:</span>
-                  <Input
-                    type="number"
-                    step="0.0001"
-                    min="0"
-                    value={jornadaInput}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setJornadaInput(value);
-                      if (value === '' || value === '-') {
-                        return;
-                      }
-                      const numValue = parseFloat(value);
-                      if (!isNaN(numValue) && numValue >= 0) {
-                        setJornada(truncateToFour(numValue));
-                        if (valoresOriginales) {
-                          setHasChanges(true);
+                  {!esModoLectura ? (
+                    <Input
+                      type="number"
+                      step="0.0001"
+                      min="0"
+                      value={jornadaInput}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setJornadaInput(value);
+                        if (value === '' || value === '-') {
+                          return;
                         }
-                      }
-                    }}
-                    onBlur={(e) => {
-                      const value = e.target.value;
-                      if (value === '' || value === '-') {
-                        setJornadaInput('8.0000');
-                        setJornada(8);
-                        return;
-                      }
-                      const numValue = parseFloat(value);
-                      if (isNaN(numValue) || numValue < 0) {
-                        setJornadaInput(jornada.toFixed(4));
-                      } else {
-                        const truncated = truncateToFour(numValue);
-                        setJornadaInput(truncated.toFixed(4));
-                        setJornada(truncated);
-                      }
-                    }}
-                    disabled={esModoLectura}
-                    className="text-[10px] h-6 w-16 text-center px-1"
-                  />
-                  <span className="text-[8px] text-[var(--text-secondary)]">h</span>
+                        const numValue = parseFloat(value);
+                        if (!isNaN(numValue) && numValue >= 0) {
+                          setJornada(truncateToFour(numValue));
+                          if (valoresOriginales) {
+                            setHasChanges(true);
+                          }
+                        }
+                      }}
+                      onBlur={(e) => {
+                        const value = e.target.value;
+                        if (value === '' || value === '-') {
+                          setJornadaInput('8.0000');
+                          setJornada(8);
+                          return;
+                        }
+                        const numValue = parseFloat(value);
+                        if (isNaN(numValue) || numValue < 0) {
+                          setJornadaInput(jornada.toFixed(4));
+                        } else {
+                          const truncated = truncateToFour(numValue);
+                          setJornadaInput(truncated.toFixed(4));
+                          setJornada(truncated);
+                        }
+                      }}
+                      className="text-xs h-6 w-16 text-center px-1"
+                    />
+                  ) : (
+                    <Input
+                      type="text"
+                      value={jornada.toFixed(4)}
+                      disabled
+                      placeholder="8.0000"
+                      className="text-xs h-6 w-16 text-center px-1"
+                    />
+                  )}
+                  <span className="text-xs text-[var(--text-secondary)]">h</span>
                 </div>
                 <div>
                   <span className="text-[var(--text-secondary)]">Precio Unit.:</span>
-                  <span className="ml-1 font-medium text-[var(--text-primary)]">
-                    S/ {partidaSeleccionada.precio_unitario.toFixed(2)}
-                  </span>
+                  <Input
+                    type="text"
+                    value={`S/ ${partidaSeleccionada.precio_unitario.toFixed(2)}`}
+                    disabled
+                    placeholder="S/ 0.00"
+                    className="text-xs h-6 w-24 px-1 ml-1"
+                  />
                 </div>
                 <div>
                   <span className="text-[var(--text-secondary)]">Costo Directo:</span>
-                  <span className="ml-1 font-medium text-[var(--text-primary)]">
-                    S/ {totales.costo_directo.toFixed(2)}
-                  </span>
+                  <Input
+                    type="text"
+                    value={`S/ ${totales.costo_directo.toFixed(2)}`}
+                    disabled
+                    placeholder="S/ 0.00"
+                    className="text-xs h-6 w-24 px-1 ml-1"
+                  />
                 </div>
               </div>
             </div>
@@ -1161,31 +1253,37 @@ export default function ModalAgregarSubPartida({
             {/* Resumen de Costos */}
             <div className="px-2 py-1.5 table-header-shadow">
               <div className="flex items-center gap-2">
-                <span className="text-[10px] text-[var(--text-secondary)]">Resumen:</span>
-                <div className="flex gap-1.5">
-                  <div
-                    className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${getTipoRecursoColor('MANO_OBRA')}`}
-                  >
-                    MO: S/ {totales.costo_mano_obra.toFixed(2)}
-                  </div>
-                  <div
-                    className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${getTipoRecursoColor('MATERIAL')}`}
-                  >
-                    MT: S/ {totales.costo_materiales.toFixed(2)}
-                  </div>
-                  <div
-                    className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${getTipoRecursoColor('EQUIPO')}`}
-                  >
-                    EQ: S/ {totales.costo_equipos.toFixed(2)}
-                  </div>
-                  {totales.costo_subcontratos > 0 && (
-                    <div
-                      className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${getTipoRecursoColor('SUBCONTRATO')}`}
-                    >
-                      SC: S/ {totales.costo_subcontratos.toFixed(2)}
+                <span className="text-xs text-[var(--text-secondary)]">Resumen:</span>
+                {hasPartida ? (
+                  <div className="flex gap-1.5">
+                    <div className={`px-1.5 py-0.5 rounded text-xs ${getTipoRecursoColor('MANO_OBRA')}`}>
+                      MO: S/ {totales.costo_mano_obra.toFixed(2)}
                     </div>
-                  )}
-                </div>
+                    <div className={`px-1.5 py-0.5 rounded text-xs ${getTipoRecursoColor('MATERIAL')}`}>
+                      MT: S/ {totales.costo_materiales.toFixed(2)}
+                    </div>
+                    <div className={`px-1.5 py-0.5 rounded text-xs ${getTipoRecursoColor('EQUIPO')}`}>
+                      EQ: S/ {totales.costo_equipos.toFixed(2)}
+                    </div>
+                    {totales.costo_subcontratos > 0 && (
+                      <div className={`px-1.5 py-0.5 rounded text-xs ${getTipoRecursoColor('SUBCONTRATO')}`}>
+                        SC: S/ {totales.costo_subcontratos.toFixed(2)}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex gap-1.5">
+                    <div className="px-1.5 py-0.5 rounded text-xs bg-gray-500/10 text-gray-600 dark:text-gray-400 opacity-50">
+                      MO: S/ 0.00
+                    </div>
+                    <div className="px-1.5 py-0.5 rounded text-xs bg-gray-500/10 text-gray-600 dark:text-gray-400 opacity-50">
+                      MT: S/ 0.00
+                    </div>
+                    <div className="px-1.5 py-0.5 rounded text-xs bg-gray-500/10 text-gray-600 dark:text-gray-400 opacity-50">
+                      EQ: S/ 0.00
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1205,28 +1303,28 @@ export default function ModalAgregarSubPartida({
             </div>
           ) : (
             <div className="py-1">
-              <table className="w-full text-[10px]">
-                <thead className="sticky top-0 bg-[var(--card-bg)] z-10 table-header-shadow">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-[var(--background)] z-10 table-header-shadow">
                   <tr className="border-b border-[var(--border-color)]">
-                    <th className="px-1 py-1 text-left font-medium text-[var(--text-secondary)] uppercase w-[35%]">
+                    <th className="pl-3 pr-1 py-1 text-left font-medium text-[var(--text-secondary)] uppercase w-[35%] bg-[var(--background)] relative z-20">
                       Insumo
                     </th>
-                    <th className="px-1 py-1 text-center font-medium text-[var(--text-secondary)] uppercase w-[8%]">
+                    <th className="px-1 py-1 text-center font-medium text-[var(--text-secondary)] uppercase w-[8%] bg-[var(--background)] relative z-20">
                       Und.
                     </th>
-                    <th className="px-1 py-1 text-center font-medium text-[var(--text-secondary)] uppercase w-[8%]">
+                    <th className="px-1 py-1 text-center font-medium text-[var(--text-secondary)] uppercase w-[8%] bg-[var(--background)] relative z-20">
                       Cuad.
                     </th>
-                    <th className="px-1 py-1 text-right font-medium text-[var(--text-secondary)] uppercase w-[12%]">
+                    <th className="px-1 py-1 text-right font-medium text-[var(--text-secondary)] uppercase w-[12%] bg-[var(--background)] relative z-20">
                       Cantidad
                     </th>
-                    <th className="px-1 py-1 text-right font-medium text-[var(--text-secondary)] uppercase w-[12%]">
+                    <th className="px-1 py-1 text-right font-medium text-[var(--text-secondary)] uppercase w-[12%] bg-[var(--background)] relative z-20">
                       P.U.
                     </th>
-                    <th className="px-1 py-1 text-right font-medium text-[var(--text-secondary)] uppercase w-[15%]">
+                    <th className="px-1 py-1 text-right font-medium text-[var(--text-secondary)] uppercase w-[15%] bg-[var(--background)] relative z-20">
                       Parcial
                     </th>
-                    <th className="px-1 py-1 text-center font-medium text-[var(--text-secondary)] uppercase w-[10%]"></th>
+                    <th className="px-1 py-1 text-center font-medium text-[var(--text-secondary)] uppercase w-[10%] bg-[var(--background)] relative z-20"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border-color)]">
@@ -1249,13 +1347,13 @@ export default function ModalAgregarSubPartida({
                                 handleSeleccionarRecurso(recurso.id_recurso_apu, r)
                               }
                               placeholder="Buscar recurso..."
-                              className="text-[10px]"
+                              className="text-xs"
                             />
                           ) : (
                             <div className="flex items-center gap-1">
                               {recurso.tipo_recurso && (
                                 <span
-                                  className={`px-1 py-0.5 rounded text-[8px] font-medium ${getTipoRecursoColor(recurso.tipo_recurso)}`}
+                                  className={`px-1 py-0.5 rounded text-xs flex-shrink-0 ${getTipoRecursoColor(recurso.tipo_recurso)}`}
                                 >
                                   {getTipoRecursoAbrev(recurso.tipo_recurso)}
                                 </span>
@@ -1270,15 +1368,7 @@ export default function ModalAgregarSubPartida({
                           )}
                         </td>
                         <td className="px-1 py-1 text-center">
-                          <Input
-                            type="text"
-                            value={recurso.unidad_medida || ''}
-                            onChange={(e) =>
-                              handleUpdateRecurso(recurso.id_recurso_apu, 'unidad_medida', e.target.value)
-                            }
-                            disabled={esModoLectura}
-                            className="text-[10px] h-6 w-full text-center px-1"
-                          />
+                          <span className="text-xs text-[var(--text-primary)]">{recurso.unidad_medida || '—'}</span>
                         </td>
                         <td className="px-1 py-1 text-center">
                           {debeMostrarCuadrilla ? (
@@ -1312,145 +1402,170 @@ export default function ModalAgregarSubPartida({
                                 }
                               }}
                               disabled={esModoLectura}
-                              className="text-[10px] h-6 w-full text-center px-1"
+                              className="text-xs h-6 w-full text-center px-1"
                             />
                           ) : (
-                            <span className="text-[10px] text-[var(--text-secondary)] italic"></span>
+                            <span className="text-xs text-[var(--text-secondary)] italic"></span>
                           )}
                         </td>
-                        <td className="px-1 py-1 text-right">
+                        <td className="px-1 py-1 text-center">
+                          {!esModoLectura ? (
+                            (() => {
+                              const esEquipoPorcentajeMo = recurso.tipo_recurso === 'EQUIPO' && (recurso.unidad_medida === '%mo' || recurso.unidad_medida?.toLowerCase() === '%mo');
+                              return (
+                                <div className="relative inline-flex items-center justify-center w-full">
+                                  <Input
+                                    type="number"
+                                    step="0.0001"
+                                    min="0"
+                                    value={recurso.cantidad ?? ''}
+                                    onChange={(e) => {
+                                      const value = e.target.value;
+                                      if (value === '' || value === '-') {
+                                        handleUpdateRecurso(recurso.id_recurso_apu, 'cantidad', 0);
+                                        return;
+                                      }
+                                      const numValue = parseFloat(value);
+                                      if (!isNaN(numValue) && numValue >= 0) {
+                                        handleUpdateRecurso(recurso.id_recurso_apu, 'cantidad', numValue);
+                                      }
+                                    }}
+                                    className={`text-xs h-6 w-full text-center ${esEquipoPorcentajeMo ? 'pr-4' : 'px-1'}`}
+                                  />
+                                  {esEquipoPorcentajeMo && (
+                                    <span className="absolute right-2 text-xs text-[var(--text-secondary)] pointer-events-none">%</span>
+                                  )}
+                                </div>
+                              );
+                            })()
+                          ) : (
+                            <span className="text-xs text-[var(--text-primary)]">
+                              {recurso.cantidad?.toFixed(4) || '—'}
+                              {recurso.tipo_recurso === 'EQUIPO' && (recurso.unidad_medida === '%mo' || recurso.unidad_medida?.toLowerCase() === '%mo') && (
+                                <span className="text-xs text-[var(--text-secondary)] ml-0.5">%</span>
+                              )}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-1 py-1 text-center">
                           {(() => {
-                            const esEquipoPorcentajeMo =
-                              recurso.tipo_recurso === 'EQUIPO' &&
-                              (recurso.unidad_medida === '%mo' ||
-                                recurso.unidad_medida?.toLowerCase() === '%mo');
-                            return (
-                              <div className="relative inline-flex items-center justify-end w-full">
+                            const esEquipoPorcentajeMo = recurso.tipo_recurso === 'EQUIPO' && (recurso.unidad_medida === '%mo' || recurso.unidad_medida?.toLowerCase() === '%mo');
+
+                            // Para subpartidas o %mo, mostrar precio como texto de solo lectura
+                            if ((recurso.esSubpartida && recurso.precio_unitario_subpartida !== undefined) || esEquipoPorcentajeMo) {
+                              return (
+                                <span className="text-xs text-[var(--text-primary)]">
+                                  {recurso.esSubpartida
+                                    ? `S/ ${recurso.precio_unitario_subpartida !== undefined && recurso.precio_unitario_subpartida !== null ? recurso.precio_unitario_subpartida.toFixed(2) : '—'}`
+                                    : `S/ ${recurso.precio !== undefined && recurso.precio !== null ? recurso.precio.toFixed(2) : '—'}`
+                                  }
+                                </span>
+                              );
+                            }
+
+                            return !esModoLectura ? (
+                              <div className="flex items-center gap-1 justify-center">
                                 <Input
                                   type="number"
                                   step="0.0001"
                                   min="0"
-                                  value={recurso.cantidad ?? ''}
+                                  value={recurso.precio ?? ''}
                                   onChange={(e) => {
                                     const value = e.target.value;
                                     if (value === '' || value === '-') {
-                                      handleUpdateRecurso(recurso.id_recurso_apu, 'cantidad', 0);
+                                      handleUpdateRecurso(recurso.id_recurso_apu, 'precio', 0);
+                                      // Si tiene override activado, actualizar también precio_override
+                                      if (recurso.tiene_precio_override) {
+                                        handleUpdateRecurso(recurso.id_recurso_apu, 'precio_override', 0 as number);
+                                      }
                                       return;
                                     }
                                     const numValue = parseFloat(value);
                                     if (!isNaN(numValue) && numValue >= 0) {
-                                      handleUpdateRecurso(recurso.id_recurso_apu, 'cantidad', numValue);
+                                      // Asegurar que se muestre con exactamente 2 decimales
+                                      const roundedValue = roundToTwo(numValue);
+                                      handleUpdateRecurso(recurso.id_recurso_apu, 'precio', roundedValue);
+                                      // Si tiene override activado, actualizar también precio_override
+                                      if (recurso.tiene_precio_override) {
+                                        handleUpdateRecurso(recurso.id_recurso_apu, 'precio_override', roundedValue);
+                                      }
+                                    } else {
+                                      // Si no es válido, restaurar el valor anterior
+                                      handleUpdateRecurso(recurso.id_recurso_apu, 'precio', recurso.precio || 0);
                                     }
                                   }}
-                                  onBlur={(e) => {
-                                    const value = e.target.value;
-                                    if (value === '' || value === '-') {
-                                      // Restaurar a 0 si está vacío
-                                      handleUpdateRecurso(recurso.id_recurso_apu, 'cantidad', 0);
-                                      return;
-                                    }
-                                    const numValue = parseFloat(value);
-                                    if (isNaN(numValue) || numValue < 0) {
-                                      // Restaurar a 0 si es inválido
-                                      handleUpdateRecurso(recurso.id_recurso_apu, 'cantidad', 0);
+                                  onKeyDown={(e) => {
+                                    const key = e.key;
+                                    const currentValue = e.currentTarget.value;
+                                    const parts = currentValue.split('.');
+                                    const hasDecimal = parts.length > 1;
+                                    const decimalsCount = hasDecimal ? parts[1].length : 0;
+
+                                    // Prevenir entrada de caracteres no numéricos excepto punto y teclas de control
+                                    const isNumber = /^\d$/.test(key);
+                                    const isDecimal = key === '.' && !hasDecimal;
+                                    const isControl = ['Backspace', 'Delete', 'Tab', 'Escape', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(key);
+                                    const isPaste = (e.ctrlKey || e.metaKey) && key === 'v';
+
+                                    // Si ya hay 2 decimales y se intenta escribir un número, bloquear
+                                    if (hasDecimal && decimalsCount >= 2 && isNumber && !isControl) {
+                                      e.preventDefault();
+                                    } else if (!isNumber && !isDecimal && !isControl && !isPaste) {
+                                      e.preventDefault();
                                     }
                                   }}
-                                  disabled={esModoLectura}
-                                  className={`text-[10px] h-6 w-full text-right ${esEquipoPorcentajeMo ? 'pr-4' : 'px-1'}`}
+                                  onPaste={(e) => {
+                                    e.preventDefault();
+                                    const pastedText = e.clipboardData.getData('text');
+                                    const numValue = parseFloat(pastedText);
+                                    if (!isNaN(numValue) && numValue >= 0) {
+                                      const roundedValue = roundToTwo(numValue);
+                                      handleUpdateRecurso(recurso.id_recurso_apu, 'precio', roundedValue);
+                                      // Si tiene override activado, actualizar también precio_override
+                                      if (recurso.tiene_precio_override) {
+                                        handleUpdateRecurso(recurso.id_recurso_apu, 'precio_override', roundedValue);
+                                      }
+                                    }
+                                  }}
+                                  className="text-xs h-6 w-20 text-center px-1"
+                                  title="Precio unitario (máximo 2 decimales)"
                                 />
-                                {esEquipoPorcentajeMo && (
-                                  <span className="absolute right-2 text-[9px] text-[var(--text-secondary)] pointer-events-none">
-                                    %
+                                <label className="flex items-center gap-1 cursor-pointer group" title="Precio único (no afecta precio compartido)">
+                                  <input
+                                    type="checkbox"
+                                    checked={recurso.tiene_precio_override || false}
+                                    onChange={(e) => {
+                                      const checked = e.target.checked;
+                                      handleUpdateRecurso(recurso.id_recurso_apu, 'tiene_precio_override', checked);
+
+                                      // Si se activa, copiar el precio actual a precio_override
+                                      if (checked) {
+                                        handleUpdateRecurso(recurso.id_recurso_apu, 'precio_override', recurso.precio || 0);
+                                      } else {
+                                        // Si se desactiva, limpiar precio_override
+                                        handleUpdateRecurso(recurso.id_recurso_apu, 'precio_override', null);
+                                      }
+                                    }}
+                                    className="w-3 h-3 cursor-pointer accent-[var(--primary-color)]"
+                                  />
+                                  <span className="text-xs text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">
+                                    Único
+                                  </span>
+                                </label>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1 justify-center">
+                                <span className="text-xs text-[var(--text-primary)]">
+                                  {recurso.precio !== undefined && recurso.precio !== null ? `S/ ${recurso.precio.toFixed(2)}` : '—'}
+                                </span>
+                                {!esEquipoPorcentajeMo && recurso.tiene_precio_override && (
+                                  <span className="text-xs text-[var(--text-secondary)] italic" title="Precio único">
+                                    (Único)
                                   </span>
                                 )}
                               </div>
                             );
                           })()}
-                        </td>
-                        <td className="px-1 py-1 text-right">
-                          <Input
-                            type="number"
-                            step="0.0001"
-                            min="0"
-                            value={recurso.precio ?? ''}
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              if (value === '' || value === '-') {
-                                handleUpdateRecurso(recurso.id_recurso_apu, 'precio', 0);
-                                return;
-                              }
-                              const numValue = parseFloat(value);
-                              if (!isNaN(numValue) && numValue >= 0) {
-                                const roundedValue = roundToTwo(numValue);
-                                handleUpdateRecurso(recurso.id_recurso_apu, 'precio', roundedValue);
-                              } else {
-                                handleUpdateRecurso(recurso.id_recurso_apu, 'precio', recurso.precio || 0);
-                              }
-                            }}
-                            onBlur={(e) => {
-                              const value = e.target.value;
-                              if (value === '' || value === '-') {
-                                // Restaurar a 0 si está vacío
-                                handleUpdateRecurso(recurso.id_recurso_apu, 'precio', 0);
-                                return;
-                              }
-                              const numValue = parseFloat(value);
-                              if (isNaN(numValue) || numValue < 0) {
-                                // Restaurar a 0 si es inválido
-                                handleUpdateRecurso(recurso.id_recurso_apu, 'precio', 0);
-                              }
-                            }}
-                            onKeyDown={(e) => {
-                              const key = e.key;
-                              const currentValue = e.currentTarget.value;
-                              const parts = currentValue.split('.');
-                              const hasDecimal = parts.length > 1;
-                              const decimalsCount = hasDecimal ? parts[1].length : 0;
-
-                              const isNumber = /^\d$/.test(key);
-                              const isDecimal = key === '.' && !hasDecimal;
-                              const isControl = [
-                                'Backspace',
-                                'Delete',
-                                'Tab',
-                                'Escape',
-                                'Enter',
-                                'ArrowLeft',
-                                'ArrowRight',
-                                'ArrowUp',
-                                'ArrowDown',
-                                'Home',
-                                'End',
-                              ].includes(key);
-                              const isPaste = (e.ctrlKey || e.metaKey) && key === 'v';
-
-                              if (hasDecimal && decimalsCount >= 2 && isNumber && !isControl) {
-                                e.preventDefault();
-                                return;
-                              }
-
-                              if (!isNumber && !isDecimal && !isControl && !isPaste) {
-                                e.preventDefault();
-                              }
-                            }}
-                            onPaste={(e) => {
-                              e.preventDefault();
-                              const pastedText = e.clipboardData.getData('text');
-                              const numValue = parseFloat(pastedText);
-                              if (!isNaN(numValue) && numValue >= 0) {
-                                const roundedValue = roundToTwo(numValue);
-                                handleUpdateRecurso(recurso.id_recurso_apu, 'precio', roundedValue);
-                              }
-                            }}
-                            className="text-[10px] h-6 w-full text-right px-1"
-                            title="Precio unitario (máximo 2 decimales)"
-                            disabled={
-                              esModoLectura ||
-                              (recurso.tipo_recurso === 'EQUIPO' &&
-                                (recurso.unidad_medida === '%mo' ||
-                                  recurso.unidad_medida?.toLowerCase() === '%mo'))
-                            }
-                          />
                         </td>
                         <td className="px-1 py-1 text-right font-medium text-[var(--text-primary)]">
                           <span>

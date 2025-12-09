@@ -4,6 +4,14 @@ import { GET_PRESUPUESTOS_BY_PROYECTO_QUERY, GET_PRESUPUESTO_QUERY, GET_ESTRUCTU
 import { ADD_PRESUPUESTO_MUTATION, UPDATE_PRESUPUESTO_MUTATION, DELETE_PRESUPUESTO_MUTATION, CREAR_PRESUPUESTO_PADRE_MUTATION, CREAR_VERSION_DESDE_PADRE_MUTATION, CREAR_VERSION_DESDE_VERSION_MUTATION, ENVIAR_A_LICITACION_MUTATION, PASAR_A_CONTRACTUAL_MUTATION, CREAR_PRESUPUESTO_META_DESDE_CONTRACTUAL_MUTATION, ACTUALIZAR_PRESUPUESTO_PADRE_MUTATION, ELIMINAR_GRUPO_PRESUPUESTO_COMPLETO_MUTATION, ENVIAR_VERSION_META_A_APROBACION_MUTATION, ENVIAR_VERSION_META_A_OFICIALIZACION_MUTATION } from '@/graphql/mutations/presupuesto.mutations';
 import { useAuth } from '@/context/auth-context';
 import toast from 'react-hot-toast';
+import type { APUCalculo } from '@/utils/calculoEstructura';
+import {
+  calcularCostoDirectoAPU,
+  crearMapaAPUsPorPartida,
+  calcularPartidas,
+  propagarTotalesTitulos,
+  calcularParcialPresupuesto
+} from '@/utils/calculoEstructura';
 
 export interface Presupuesto {
   _id?: string;
@@ -169,25 +177,302 @@ export interface PartidaEstructura {
   estado: 'Activa' | 'Inactiva';
 }
 
+// Tipos para APUs en la estructura
+export interface RecursoAPUEstructura {
+  id_recurso_apu: string;
+  recurso_id?: string;
+  id_partida_subpartida?: string;
+  codigo_recurso?: string;
+  descripcion: string;
+  unidad_medida?: string;
+  tipo_recurso: string;
+  id_precio_recurso?: string;
+  precio: number;
+  precio_override?: number;
+  tiene_precio_override?: boolean;
+  cantidad: number;
+  cuadrilla?: number;
+  desperdicio_porcentaje?: number;
+  cantidad_con_desperdicio?: number;
+  parcial?: number;
+  precio_unitario_subpartida?: number;
+  orden: number;
+}
+
+export interface APUEstructura {
+  _id?: string;
+  id_apu: string;
+  id_partida: string;
+  id_presupuesto: string;
+  id_proyecto: string;
+  rendimiento: number;
+  jornada: number;
+  recursos: RecursoAPUEstructura[];
+}
+
+export interface PrecioCompartidoEstructura {
+  id_precio_recurso: string;
+  recurso_id: string;
+  precio: number;
+}
+
 export interface EstructuraPresupuesto {
   presupuesto: Presupuesto;
   titulos: TituloEstructura[];
   partidas: PartidaEstructura[];
+  apus?: APUEstructura[]; // NUEVO: APUs completos para cálculos en frontend
+  precios_compartidos?: PrecioCompartidoEstructura[]; // NUEVO: Precios compartidos para cálculos en frontend
 }
 
 /**
  * Hook para obtener la estructura completa del presupuesto (títulos y partidas)
+ * AHORA CALCULA precio_unitario, parcial_partida y total_parcial en frontend
  */
 export function useEstructuraPresupuesto(id_presupuesto: string | null) {
   return useQuery({
     queryKey: ['estructura-presupuesto', id_presupuesto],
     queryFn: async () => {
       if (!id_presupuesto) return null;
+      
+      const tiempoQueryInicio = performance.now();
       const response = await executeQuery<{ getEstructuraPresupuesto: EstructuraPresupuesto | null }>(
         GET_ESTRUCTURA_PRESUPUESTO_QUERY,
         { id_presupuesto }
       );
-      return response.getEstructuraPresupuesto;
+      const tiempoQueryTotal = performance.now() - tiempoQueryInicio;
+      console.log(`[HOOK] ⏱️ Query GraphQL: ${tiempoQueryTotal.toFixed(2)}ms`);
+      
+      const estructura = response.getEstructuraPresupuesto;
+      if (!estructura) return null;
+
+      const tiempoCalculoInicio = performance.now();
+      
+      // Analizar partidas para identificar subpartidas
+      const partidasConPadre = estructura.partidas.filter(p => p.id_partida_padre !== null);
+      const partidasRaiz = estructura.partidas.filter(p => p.id_partida_padre === null);
+      
+      // Analizar recursos de APUs para identificar subpartidas
+      let recursosConSubpartida = 0;
+      estructura.apus?.forEach(apu => {
+        apu.recursos?.forEach(recurso => {
+          if (recurso.id_partida_subpartida) {
+            recursosConSubpartida++;
+          }
+        });
+      });
+      
+      console.log(`[HOOK] 📊 Datos recibidos:`, {
+        titulos: estructura.titulos?.length || 0,
+        partidas: estructura.partidas?.length || 0,
+        partidasRaiz: partidasRaiz.length,
+        partidasConPadre: partidasConPadre.length,
+        apus: estructura.apus?.length || 0,
+        recursosConSubpartida,
+        preciosCompartidos: estructura.precios_compartidos?.length || 0,
+      });
+      
+      // Log detallado de subpartidas encontradas
+      if (partidasConPadre.length > 0) {
+        console.log(`[HOOK] 🔍 Subpartidas encontradas en partidas:`, partidasConPadre.map(p => ({
+          id_partida: p.id_partida,
+          id_partida_padre: p.id_partida_padre,
+          descripcion: p.descripcion,
+          nivel_partida: p.nivel_partida,
+        })));
+      }
+      
+      // Log detallado de recursos que son subpartidas
+      if (recursosConSubpartida > 0) {
+        console.log(`[HOOK] 🔍 Recursos que son subpartidas encontrados: ${recursosConSubpartida}`);
+        estructura.apus?.forEach(apu => {
+          apu.recursos?.forEach(recurso => {
+            if (recurso.id_partida_subpartida) {
+              console.log(`[HOOK]   - Recurso subpartida en APU ${apu.id_apu}:`, {
+                id_recurso_apu: recurso.id_recurso_apu,
+                id_partida_subpartida: recurso.id_partida_subpartida,
+                descripcion: recurso.descripcion,
+                precio_unitario_subpartida: recurso.precio_unitario_subpartida,
+              });
+            }
+          });
+        });
+      }
+
+      // Variables para almacenar resultados calculados
+      let partidasCompletas: PartidaEstructura[];
+      let titulosCalculados: TituloEstructura[];
+      let parcialPresupuesto: number;
+
+      // Si no hay APUs, calcular con valores en 0
+      if (!estructura.apus || estructura.apus.length === 0) {
+        const tiempoSinApusInicio = performance.now();
+        partidasCompletas = estructura.partidas.map(p => ({
+          ...p,
+          precio_unitario: 0,
+          parcial_partida: 0
+        }));
+        
+        // Propagar totales de títulos (aunque sean 0)
+        const partidasCalculadas = partidasCompletas.map(p => ({
+          id_partida: p.id_partida,
+          id_titulo: p.id_titulo,
+          id_partida_padre: p.id_partida_padre,
+          metrado: p.metrado,
+          precio_unitario: 0,
+          parcial_partida: 0
+        }));
+        
+        const tiempoPropagarInicio = performance.now();
+        const totalesTitulos = propagarTotalesTitulos(
+          estructura.titulos.map(t => ({
+            id_titulo: t.id_titulo,
+            id_titulo_padre: t.id_titulo_padre
+          })),
+          partidasCalculadas
+        );
+        const tiempoPropagar = performance.now() - tiempoPropagarInicio;
+        console.log(`[HOOK] ⏱️ Propagar totales títulos: ${tiempoPropagar.toFixed(2)}ms`);
+        
+        titulosCalculados = estructura.titulos.map(titulo => ({
+          ...titulo,
+          total_parcial: totalesTitulos.get(titulo.id_titulo) || 0
+        }));
+        
+        parcialPresupuesto = calcularParcialPresupuesto(
+          estructura.titulos.map(t => ({
+            id_titulo: t.id_titulo,
+            id_titulo_padre: t.id_titulo_padre
+          })),
+          totalesTitulos
+        );
+        const tiempoSinApusTotal = performance.now() - tiempoSinApusInicio;
+        console.log(`[HOOK] ⏱️ Cálculo sin APUs: ${tiempoSinApusTotal.toFixed(2)}ms`);
+      } else {
+        const tiempoConApusInicio = performance.now();
+        // Crear mapa de precios compartidos (id_precio_recurso -> precio)
+        const tiempoMapaPreciosInicio = performance.now();
+        const preciosCompartidosMap = new Map<string, number>();
+        if (estructura.precios_compartidos && estructura.precios_compartidos.length > 0) {
+          estructura.precios_compartidos.forEach(p => {
+            preciosCompartidosMap.set(p.id_precio_recurso, p.precio);
+          });
+        }
+        const tiempoMapaPrecios = performance.now() - tiempoMapaPreciosInicio;
+        console.log(`[HOOK] ⏱️ Crear mapa precios compartidos: ${tiempoMapaPrecios.toFixed(2)}ms`);
+
+        // Convertir APUs a formato de cálculo
+        const tiempoConvertirApusInicio = performance.now();
+        const apusCalculo: APUCalculo[] = estructura.apus.map(apu => ({
+          id_apu: apu.id_apu,
+          id_partida: apu.id_partida,
+          rendimiento: apu.rendimiento,
+          jornada: apu.jornada,
+          recursos: apu.recursos.map(r => ({
+            id_recurso_apu: r.id_recurso_apu,
+            recurso_id: r.recurso_id,
+            id_partida_subpartida: r.id_partida_subpartida,
+            tipo_recurso: r.tipo_recurso,
+            unidad_medida: r.unidad_medida,
+            cantidad: r.cantidad,
+            precio: r.precio,
+            precio_override: r.precio_override,
+            tiene_precio_override: r.tiene_precio_override || false,
+            id_precio_recurso: r.id_precio_recurso, // NUEVO: para buscar precio compartido
+            parcial: r.parcial, // NUEVO: para calcular precio si no hay compartido
+            cuadrilla: r.cuadrilla,
+            desperdicio_porcentaje: r.desperdicio_porcentaje,
+            precio_unitario_subpartida: r.precio_unitario_subpartida
+          }))
+        }));
+        const tiempoConvertirApus = performance.now() - tiempoConvertirApusInicio;
+        console.log(`[HOOK] ⏱️ Convertir ${apusCalculo.length} APUs: ${tiempoConvertirApus.toFixed(2)}ms`);
+
+        // Crear mapa para acceso rápido: id_partida -> APU
+        const tiempoMapaApusInicio = performance.now();
+        const mapaAPUs = crearMapaAPUsPorPartida(apusCalculo);
+        const tiempoMapaApus = performance.now() - tiempoMapaApusInicio;
+        console.log(`[HOOK] ⏱️ Crear mapa APUs: ${tiempoMapaApus.toFixed(2)}ms`);
+
+        // Calcular precio_unitario y parcial_partida para cada partida
+        const tiempoCalcularPartidasInicio = performance.now();
+        const partidasCalculadas = calcularPartidas(
+          estructura.partidas.map(p => ({
+            id_partida: p.id_partida,
+            id_titulo: p.id_titulo,
+            id_partida_padre: p.id_partida_padre,
+            metrado: p.metrado
+          })),
+          mapaAPUs,
+          preciosCompartidosMap
+        );
+        const tiempoCalcularPartidas = performance.now() - tiempoCalcularPartidasInicio;
+        console.log(`[HOOK] ⏱️ Calcular ${partidasCalculadas.length} partidas: ${tiempoCalcularPartidas.toFixed(2)}ms`);
+
+        // Mapear partidas calculadas de vuelta al formato completo
+        const tiempoMapearPartidasInicio = performance.now();
+        partidasCompletas = estructura.partidas.map(partida => {
+          const calculada = partidasCalculadas.find(p => p.id_partida === partida.id_partida);
+          return {
+            ...partida,
+            precio_unitario: calculada?.precio_unitario || 0,
+            parcial_partida: calculada?.parcial_partida || 0
+          };
+        });
+        const tiempoMapearPartidas = performance.now() - tiempoMapearPartidasInicio;
+        console.log(`[HOOK] ⏱️ Mapear partidas completas: ${tiempoMapearPartidas.toFixed(2)}ms`);
+
+        // Propagar totales de títulos (ascendente)
+        const tiempoPropagarInicio = performance.now();
+        const totalesTitulos = propagarTotalesTitulos(
+          estructura.titulos.map(t => ({
+            id_titulo: t.id_titulo,
+            id_titulo_padre: t.id_titulo_padre
+          })),
+          partidasCalculadas
+        );
+        const tiempoPropagar = performance.now() - tiempoPropagarInicio;
+        console.log(`[HOOK] ⏱️ Propagar totales títulos: ${tiempoPropagar.toFixed(2)}ms`);
+
+        // Actualizar títulos con totales calculados
+        titulosCalculados = estructura.titulos.map(titulo => ({
+          ...titulo,
+          total_parcial: totalesTitulos.get(titulo.id_titulo) || 0
+        }));
+
+        // Calcular parcial_presupuesto
+        parcialPresupuesto = calcularParcialPresupuesto(
+          estructura.titulos.map(t => ({
+            id_titulo: t.id_titulo,
+            id_titulo_padre: t.id_titulo_padre
+          })),
+          totalesTitulos
+        );
+        const tiempoConApusTotal = performance.now() - tiempoConApusInicio;
+        console.log(`[HOOK] ⏱️ Cálculo con APUs: ${tiempoConApusTotal.toFixed(2)}ms`);
+      }
+
+      // Calcular total_presupuesto (parcial + IGV + utilidad)
+      const porcentajeIGV = estructura.presupuesto.porcentaje_igv || 0;
+      const porcentajeUtilidad = estructura.presupuesto.porcentaje_utilidad || 0;
+      const montoIGV = Math.round(parcialPresupuesto * porcentajeIGV / 100 * 100) / 100;
+      const montoUtilidad = Math.round(parcialPresupuesto * porcentajeUtilidad / 100 * 100) / 100;
+      const totalPresupuesto = Math.round((parcialPresupuesto + montoIGV + montoUtilidad) * 100) / 100;
+
+      const tiempoCalculoTotal = performance.now() - tiempoCalculoInicio;
+      console.log(`[HOOK] ⏱️ Cálculo total: ${tiempoCalculoTotal.toFixed(2)}ms`);
+
+      return {
+        ...estructura,
+        presupuesto: {
+          ...estructura.presupuesto,
+          parcial_presupuesto: parcialPresupuesto,
+          monto_igv: montoIGV,
+          monto_utilidad: montoUtilidad,
+          total_presupuesto: totalPresupuesto
+        },
+        partidas: partidasCompletas,
+        titulos: titulosCalculados
+      };
     },
     enabled: !!id_presupuesto,
     staleTime: 30000,
@@ -224,6 +509,7 @@ export interface PresupuestoUpdateInput {
   plazo?: number;
   ppto_base?: number;
   ppto_oferta?: number;
+  parcial_presupuesto?: number;
   total_presupuesto?: number;
 }
 

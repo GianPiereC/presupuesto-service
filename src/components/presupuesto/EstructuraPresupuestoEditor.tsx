@@ -14,8 +14,9 @@ import { useCreateTitulo, useUpdateTitulo, useDeleteTitulo } from '@/hooks/useTi
 import { useCreatePartida, useUpdatePartida, useDeletePartida } from '@/hooks/usePartidas';
 import { useConfirm } from '@/context/confirm-context';
 import { useQueryClient } from '@tanstack/react-query';
-import { executeMutation } from '@/services/graphql-client';
+import { executeMutation, executeQuery } from '@/services/graphql-client';
 import { BATCH_ESTRUCTURA_PRESUPUESTO_MUTATION } from '@/graphql/mutations/estructura-batch.mutations';
+import { UPDATE_PRESUPUESTO_MUTATION } from '@/graphql/mutations/presupuesto.mutations';
 import toast from 'react-hot-toast';
 
 // ============================================================================
@@ -1825,9 +1826,14 @@ export default function EstructuraPresupuestoEditor({
       return;
     }
 
+    const tiempoInicio = performance.now();
+    console.log('[FRONTEND] 🚀 Iniciando guardado de cambios...');
+
     try {
       setIsSaving(true);
+      
       // Preparar datos para la mutación batch
+      const tiempoPreparacion = performance.now();
       const mapeoIdsTitulos: Map<string, string> = new Map(); // temp_id -> real_id (se llenará con la respuesta)
 
       // 1. Preparar títulos nuevos
@@ -1840,11 +1846,11 @@ export default function EstructuraPresupuestoEditor({
           id_proyecto: id_proyecto_real!,
           id_titulo_padre: titulo.id_titulo_padre || undefined,
           nivel: titulo.nivel,
-          numero_item: numeroItemCalculado,
+          numero_item: numeroItemCalculado, // Se calcula dinámicamente en frontend y se envía al backend
           descripcion: titulo.descripcion,
           tipo: titulo.tipo,
           orden: titulo.orden,
-          total_parcial: titulo.total_parcial,
+          // total_parcial ya no se envía, se calcula en frontend
           id_especialidad: titulo.id_especialidad || undefined,
           temp_id: titulo.id_titulo, // ID temporal para mapeo
         };
@@ -1861,12 +1867,12 @@ export default function EstructuraPresupuestoEditor({
           id_titulo: partida.id_titulo, // Puede ser temporal, el backend lo manejará
           id_partida_padre: partida.id_partida_padre || undefined,
           nivel_partida: partida.nivel_partida,
-          numero_item: numeroItemCalculado,
+          numero_item: numeroItemCalculado, // Se calcula dinámicamente en frontend y se envía al backend
           descripcion: partida.descripcion,
           unidad_medida: partida.unidad_medida,
           metrado: partida.metrado,
           precio_unitario: partida.precio_unitario,
-          parcial_partida: partida.parcial_partida,
+          // parcial_partida ya no se envía, se calcula en frontend
           orden: partida.orden,
           estado: partida.estado,
           temp_id: partida.id_partida, // ID temporal para mapeo
@@ -1874,55 +1880,46 @@ export default function EstructuraPresupuestoEditor({
       });
 
       // 3. Preparar títulos a actualizar
-      // Si hay elementos eliminados, todos los elementos restantes deben actualizar su numero_item
-      const hayEliminaciones = titulosEliminados.size > 0 || partidasEliminadas.size > 0;
-
+      // ⚠️ NO actualizamos numero_item - se calcula dinámicamente en frontend basado en orden/nivel/padre
       const titulosActualizar = titulos
         .filter(t => !t.id_titulo.startsWith('temp_'))
         .map(titulo => {
           const original = titulosOriginales.find(t => t.id_titulo === titulo.id_titulo);
           if (!original) return null;
 
-          // Calcular numero_item dinámicamente basado en la posición jerárquica actual
-          const numeroItemCalculado = calcularNumeroItem(titulo, 'TITULO');
-
           const cambios: any = { id_titulo: titulo.id_titulo };
           if (titulo.descripcion !== original.descripcion) cambios.descripcion = titulo.descripcion;
           if (titulo.id_titulo_padre !== original.id_titulo_padre) cambios.id_titulo_padre = titulo.id_titulo_padre;
           if (titulo.orden !== original.orden) cambios.orden = titulo.orden;
           if (titulo.nivel !== original.nivel) cambios.nivel = titulo.nivel;
-          // Siempre actualizar numero_item con el valor calculado dinámicamente
-          // Si hay eliminaciones, forzar actualización incluso si el numero_item no cambió visualmente
-          if (numeroItemCalculado !== original.numero_item || hayEliminaciones) {
-            cambios.numero_item = numeroItemCalculado;
-          }
+          // numero_item NO se actualiza - se calcula dinámicamente en frontend
           if (titulo.tipo !== original.tipo) cambios.tipo = titulo.tipo;
-          if (titulo.total_parcial !== original.total_parcial) cambios.total_parcial = titulo.total_parcial;
+          // total_parcial ya no se envía, se calcula en frontend
 
           // Verificar si hay cambios además del id_titulo
-          const tieneCambios = Object.keys(cambios).length > 0;
+          const tieneCambios = Object.keys(cambios).length > 1; // Ya incluye id_titulo
 
-          // Incluir id_especialidad si cambió o si hay otros cambios (para asegurar que se guarde correctamente en cambios globales)
+          // Incluir id_especialidad SOLO si cambió (no forzar si hay otros cambios)
           if (titulo.id_especialidad !== original.id_especialidad) {
-            cambios.id_especialidad = titulo.id_especialidad || null;
-          } else if (tieneCambios && titulo.id_especialidad !== undefined) {
-            // Si hay otros cambios, incluir id_especialidad también para asegurar que se guarde correctamente
             cambios.id_especialidad = titulo.id_especialidad || null;
           }
 
-          return Object.keys(cambios).length > 1 ? cambios : null; // Solo si hay cambios además del id
+          // Solo retornar si hay cambios reales (más allá del id_titulo)
+          if (Object.keys(cambios).length > 1) {
+            console.log(`[FRONTEND] 🔍 Título ${titulo.id_titulo} tiene cambios:`, Object.keys(cambios).filter(k => k !== 'id_titulo'));
+            return cambios;
+          }
+          return null;
         })
         .filter((t): t is NonNullable<typeof t> => t !== null);
 
       // 4. Preparar partidas a actualizar
+      // ⚠️ NO actualizamos numero_item - se calcula dinámicamente en frontend basado en orden/nivel/padre
       const partidasActualizar = partidas
         .filter(p => !p.id_partida.startsWith('temp_'))
         .map(partida => {
           const original = partidasOriginales.find(p => p.id_partida === partida.id_partida);
           if (!original) return null;
-
-          // Calcular numero_item dinámicamente basado en la posición jerárquica actual
-          const numeroItemCalculado = calcularNumeroItem(partida, 'PARTIDA');
 
           const cambios: any = { id_partida: partida.id_partida };
           if (partida.descripcion !== original.descripcion) cambios.descripcion = partida.descripcion;
@@ -1933,13 +1930,9 @@ export default function EstructuraPresupuestoEditor({
           if (partida.precio_unitario !== original.precio_unitario) cambios.precio_unitario = partida.precio_unitario;
           if (partida.unidad_medida !== original.unidad_medida) cambios.unidad_medida = partida.unidad_medida;
           if (partida.nivel_partida !== original.nivel_partida) cambios.nivel_partida = partida.nivel_partida;
-          // Siempre actualizar numero_item con el valor calculado dinámicamente
-          // Si hay eliminaciones, forzar actualización incluso si el numero_item no cambió visualmente
-          if (numeroItemCalculado !== original.numero_item || hayEliminaciones) {
-            cambios.numero_item = numeroItemCalculado;
-          }
+          // numero_item NO se actualiza - se calcula dinámicamente en frontend
           if (partida.estado !== original.estado) cambios.estado = partida.estado;
-          if (partida.parcial_partida !== original.parcial_partida) cambios.parcial_partida = partida.parcial_partida;
+          // parcial_partida ya no se envía, se calcula en frontend
 
           return Object.keys(cambios).length > 1 ? cambios : null; // Solo si hay cambios además del id
         })
@@ -1949,7 +1942,12 @@ export default function EstructuraPresupuestoEditor({
       const titulosEliminar = Array.from(titulosEliminados);
       const partidasEliminar = Array.from(partidasEliminadas);
 
+      const tiempoPreparacionTotal = performance.now() - tiempoPreparacion;
+      console.log(`[FRONTEND] ⏱️ Preparación de datos: ${tiempoPreparacionTotal.toFixed(2)}ms`);
+      console.log(`[FRONTEND] 📊 Resumen: ${titulosCrear.length} títulos crear, ${partidasCrear.length} partidas crear, ${titulosActualizar.length} títulos actualizar, ${partidasActualizar.length} partidas actualizar, ${titulosEliminar.length} títulos eliminar, ${partidasEliminar.length} partidas eliminar`);
+
       // Ejecutar mutación batch con transacción
+      const tiempoBatchInicio = performance.now();
       const response = await executeMutation<{
         batchEstructuraPresupuesto: {
           success: boolean;
@@ -1972,12 +1970,17 @@ export default function EstructuraPresupuestoEditor({
         },
       });
 
+      const tiempoBatchTotal = performance.now() - tiempoBatchInicio;
+      console.log(`[FRONTEND] ⏱️ Mutación batch completada: ${tiempoBatchTotal.toFixed(2)}ms`);
+
       if (!response.batchEstructuraPresupuesto.success) {
         throw new Error(response.batchEstructuraPresupuesto.message || 'Error al guardar los cambios');
       }
 
       // Crear APUs para subpartidas nuevas que fueron creadas
       if (subpartidasParaCrearApu.size > 0) {
+        const tiempoApuInicio = performance.now();
+        console.log(`[FRONTEND] 🔧 Creando ${subpartidasParaCrearApu.size} APUs para subpartidas...`);
         // Importar las funciones necesarias para crear APUs
         const { useCreateApu } = await import('@/hooks/useAPU');
         const createApu = useCreateApu();
@@ -2028,18 +2031,64 @@ export default function EstructuraPresupuestoEditor({
 
         // Limpiar el estado de subpartidas para crear APU
         setSubpartidasParaCrearApu(new Map());
+        const tiempoApuTotal = performance.now() - tiempoApuInicio;
+        console.log(`[FRONTEND] ⏱️ Creación de APUs completada: ${tiempoApuTotal.toFixed(2)}ms`);
       }
 
       // Invalidar queries para recargar datos
-      await queryClient.invalidateQueries({ queryKey: ['estructura-presupuesto', id_presupuesto] });
+      const tiempoInvalidacionInicio = performance.now();
+      queryClient.invalidateQueries({ queryKey: ['estructura-presupuesto', id_presupuesto] });
+      const tiempoInvalidacionTotal = performance.now() - tiempoInvalidacionInicio;
+      console.log(`[FRONTEND] ⏱️ Invalidación de queries: ${tiempoInvalidacionTotal.toFixed(2)}ms`);
+      
+      // NO esperar - React Query maneja el refetch automáticamente
+      
+      // Refetch usando fetchQuery que respeta el hook y sus cálculos
+      const tiempoRefetchInicio = performance.now();
+      console.log('[FRONTEND] 🔄 Refetch de estructura con cálculos...');
+      const estructuraCalculada = await queryClient.fetchQuery<import('@/hooks/usePresupuestos').EstructuraPresupuesto | null>({
+        queryKey: ['estructura-presupuesto', id_presupuesto],
+      });
+      const tiempoRefetchTotal = performance.now() - tiempoRefetchInicio;
+      console.log(`[FRONTEND] ⏱️ Refetch y cálculos completados: ${tiempoRefetchTotal.toFixed(2)}ms`);
+      
+      // El hook ya calculó parcial_presupuesto, monto_igv, monto_utilidad y total_presupuesto
+      // Solo tomamos esos valores que ya están calculados y los guardamos en backend
+      if (estructuraCalculada?.presupuesto) {
+        const parcialPresupuesto = estructuraCalculada.presupuesto.parcial_presupuesto || 0;
+        const montoIGV = estructuraCalculada.presupuesto.monto_igv || 0;
+        const montoUtilidad = estructuraCalculada.presupuesto.monto_utilidad || 0;
+        const totalPresupuesto = estructuraCalculada.presupuesto.total_presupuesto || 0;
+
+        // Guardar totales en el backend para uso en otras partes de la app
+        try {
+          const tiempoGuardarTotalesInicio = performance.now();
+          await executeMutation<{ updatePresupuesto: any }>(
+            UPDATE_PRESUPUESTO_MUTATION,
+            {
+              id_presupuesto: id_presupuesto,
+              parcial_presupuesto: parcialPresupuesto,
+              monto_igv: montoIGV,
+              monto_utilidad: montoUtilidad,
+              total_presupuesto: totalPresupuesto
+            }
+          );
+          const tiempoGuardarTotalesTotal = performance.now() - tiempoGuardarTotalesInicio;
+          console.log(`[FRONTEND] ⏱️ Guardado de totales: ${tiempoGuardarTotalesTotal.toFixed(2)}ms`);
+        } catch (error) {
+          console.error('[FRONTEND] ❌ Error al guardar totales del presupuesto:', error);
+          // No mostrar error al usuario, es una operación secundaria
+        }
+      }
+
+      const tiempoTotal = performance.now() - tiempoInicio;
+      console.log(`[FRONTEND] ✅ Guardado completo: ${tiempoTotal.toFixed(2)}ms`);
 
       // Limpiar estados de eliminados
       setTitulosEliminados(new Set());
       setPartidasEliminadas(new Set());
 
       toast.success(response.batchEstructuraPresupuesto.message || 'Cambios guardados exitosamente');
-
-      // Los datos se recargarán automáticamente gracias a la invalidación de queries
     } catch (error: any) {
       console.error('Error al guardar cambios:', error);
       toast.error(error?.message || 'Error al guardar los cambios. Se hizo rollback de todas las operaciones.');
@@ -2553,6 +2602,8 @@ export default function EstructuraPresupuestoEditor({
             id_presupuesto={id_presupuesto}
             id_proyecto={id_proyecto_real}
             partida={partidaSeleccionada ? partidas.find(p => p.id_partida === partidaSeleccionada) || null : null}
+            apuCalculado={partidaSeleccionada && estructuraData?.apus ? estructuraData.apus.find(apu => apu.id_partida === partidaSeleccionada) || null : null}
+            apusCalculados={estructuraData?.apus || null}
             onAgregarSubPartida={() => {
               setSubPartidaParaEditar(null);
               setModalAgregarSubPartidaAbierto(true);
@@ -2635,6 +2686,7 @@ export default function EstructuraPresupuestoEditor({
         id_presupuesto={id_presupuesto}
         id_proyecto={id_proyecto_real}
         id_partida_padre={itemSeleccionado}
+        apusCalculados={estructuraData?.apus || null}
         onAgregarSubPartida={(subPartida) => {
           // Agregar la subpartida como una nueva partida al estado
           setPartidas(prev => {

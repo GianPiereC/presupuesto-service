@@ -163,6 +163,7 @@ export const GET_PRESUPUESTOS_POR_FASE_QUERY = `
 `;
 
 // La jerarquía se construye en el frontend usando id_titulo_padre e id_partida_padre
+// AHORA INCLUYE APUs completos para calcular precio_unitario y parcial_partida en frontend
 export const GET_ESTRUCTURA_PRESUPUESTO_QUERY = `
   query GetEstructuraPresupuesto($id_presupuesto: String!) {
     getEstructuraPresupuesto(id_presupuesto: $id_presupuesto) {
@@ -224,10 +225,42 @@ export const GET_ESTRUCTURA_PRESUPUESTO_QUERY = `
         descripcion
         unidad_medida
         metrado
-        precio_unitario
-        parcial_partida
         orden
         estado
+      }
+      apus {
+        _id
+        id_apu
+        id_partida
+        id_presupuesto
+        id_proyecto
+        rendimiento
+        jornada
+        recursos {
+          id_recurso_apu
+          recurso_id
+          id_partida_subpartida
+          codigo_recurso
+          descripcion
+          unidad_medida
+          tipo_recurso
+          id_precio_recurso
+          precio
+          precio_override
+          tiene_precio_override
+          cantidad
+          cuadrilla
+          desperdicio_porcentaje
+          cantidad_con_desperdicio
+          parcial
+          precio_unitario_subpartida
+          orden
+        }
+      }
+      precios_compartidos {
+        id_precio_recurso
+        recurso_id
+        precio
       }
     }
   }

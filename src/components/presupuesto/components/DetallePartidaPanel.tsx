@@ -17,6 +17,7 @@ import {
   type TipoRecursoApu,
 } from '@/hooks/useAPU';
 import { useUpdatePartida } from '@/hooks/usePartidas';
+import { useUpdatePresupuesto, type APUEstructura } from '@/hooks/usePresupuestos';
 import { mapearTipoCostoRecursoATipoApu } from '@/utils/tipoRecursoMapper';
 import { executeQuery, executeMutation } from '@/services/graphql-client';
 import { GET_PRECIO_RECURSO_BY_PRESUPUESTO_Y_RECURSO, GET_APU_BY_PARTIDA_QUERY } from '@/graphql/queries';
@@ -115,6 +116,8 @@ interface DetallePartidaPanelProps {
   id_presupuesto?: string;
   id_proyecto?: string;
   partida?: Partida | null;
+  apuCalculado?: APUEstructura | null; // NUEVO: APU calculado del frontend (prioridad sobre query al backend)
+  apusCalculados?: APUEstructura[] | null; // NUEVO: Todos los APUs calculados (para buscar subpartidas)
   onAgregarInsumo?: () => void;
   onAgregarSubPartida?: () => void;
   onGuardarCambios?: () => void;
@@ -134,6 +137,8 @@ export default function DetallePartidaPanel({
   id_presupuesto,
   id_proyecto,
   partida,
+  apuCalculado,
+  apusCalculados,
   onAgregarInsumo,
   onAgregarSubPartida,
   onGuardarCambios,
@@ -152,9 +157,23 @@ export default function DetallePartidaPanel({
   const esPartidaNoGuardada = id_partida?.startsWith('temp_') ?? false;
 
   const queryClient = useQueryClient();
-  const { data: apuData, isLoading: isLoadingApu, refetch: refetchApu } = useApuByPartida(
-    esPartidaNoGuardada ? null : id_partida
+  // Solo hacer query al backend si NO tenemos apuCalculado y NO es partida nueva
+  const shouldFetchFromBackend = !apuCalculado && !esPartidaNoGuardada && !!id_partida;
+  const { data: apuDataBackend, isLoading: isLoadingApu, refetch: refetchApu } = useApuByPartida(
+    shouldFetchFromBackend ? id_partida : null
   );
+  
+  // Priorizar apuCalculado sobre apuDataBackend
+  const apuData = apuCalculado || apuDataBackend;
+  
+  // Log para debugging
+  useEffect(() => {
+    if (apuCalculado) {
+      console.log(`[DetallePartidaPanel] ✅ Usando APU calculado del frontend para partida ${id_partida}`);
+    } else if (apuDataBackend) {
+      console.log(`[DetallePartidaPanel] 🔄 Usando APU del backend para partida ${id_partida}`);
+    }
+  }, [apuCalculado, apuDataBackend, id_partida]);
 
   const createApu = useCreateApu();
   const updateApu = useUpdateApu();
@@ -162,6 +181,7 @@ export default function DetallePartidaPanel({
   const updateRecursoInApu = useUpdateRecursoInApu();
   const removeRecursoFromApu = useRemoveRecursoFromApu();
   const updatePartida = useUpdatePartida();
+  const updatePresupuesto = useUpdatePresupuesto();
 
   const [recursosEditables, setRecursosEditables] = useState<RecursoAPUEditable[]>([]);
   const [rendimiento, setRendimiento] = useState<number>(1.0);
@@ -240,14 +260,88 @@ export default function DetallePartidaPanel({
 
           // Si es subpartida, cargar su APU para obtener recursos, rendimiento y jornada
           if (esSubpartida && r.id_partida_subpartida) {
-            try {
-              const subpartidaApuResponse = await executeQuery<{ getApuByPartida: any }>(
-                GET_APU_BY_PARTIDA_QUERY,
-                { id_partida: r.id_partida_subpartida }
-              );
+            // Si es un temp_id, buscar en datos locales (subpartidasPendientes o subPartidaParaActualizar)
+            if (r.id_partida_subpartida.startsWith('temp_')) {
+              console.log(`[DetallePartidaPanel] 🔍 Subpartida con temp_id, buscando en datos locales: ${r.id_partida_subpartida}`);
+              
+              // Buscar en subpartidasPendientes
+              const subpartidaLocal = subpartidasPendientes?.find(sp => sp.id_partida === r.id_partida_subpartida) ||
+                                      (subPartidaParaActualizar?.id_partida === r.id_partida_subpartida ? subPartidaParaActualizar : null);
+              
+              if (subpartidaLocal && subpartidaLocal.recursos && subpartidaLocal.recursos.length > 0) {
+                console.log(`[DetallePartidaPanel] ✅ Subpartida encontrada en datos locales: ${subpartidaLocal.recursos.length} recursos`);
+                
+                // Convertir recursos locales a RecursoAPUEditable
+                const recursosSubpartida: RecursoAPUEditable[] = subpartidaLocal.recursos.map((sr: any) => {
+                  const recursoSub: RecursoAPUEditable = {
+                    id_recurso_apu: sr.id_recurso_apu || `temp-${sr.orden || 0}`,
+                    recurso_id: sr.recurso_id || '',
+                    codigo_recurso: sr.codigo_recurso || '',
+                    descripcion: sr.descripcion || '',
+                    tipo_recurso: sr.tipo_recurso || 'MATERIAL',
+                    unidad_medida: sr.unidad_medida || '',
+                    id_precio_recurso: sr.id_precio_recurso || null,
+                    precio: sr.precio || 0,
+                    cuadrilla: sr.cuadrilla,
+                    cantidad: sr.cantidad || 0,
+                    desperdicio_porcentaje: sr.desperdicio_porcentaje || 0,
+                    parcial: sr.parcial || 0,
+                    orden: sr.orden || 0,
+                    enEdicion: false,
+                    esNuevo: false,
+                    esSubpartida: false,
+                    tiene_precio_override: sr.tiene_precio_override || false,
+                    precio_override: sr.precio_override,
+                  };
+                  return recursoSub;
+                });
+                
+                recursoBase.recursosSubpartida = recursosSubpartida;
+                recursoBase.rendimientoSubpartida = subpartidaLocal.rendimiento || 1.0;
+                recursoBase.jornadaSubpartida = subpartidaLocal.jornada || 8;
+                recursoBase.id_partida_original = subpartidaLocal.id_partida_original || id_partida || undefined;
+                
+                // Continuar con el siguiente recurso
+                return recursoBase;
+              } else {
+                console.warn(`[DetallePartidaPanel] ⚠️ Subpartida con temp_id no encontrada en datos locales: ${r.id_partida_subpartida}`);
+                // Continuar sin cargar recursos (la subpartida aún no existe)
+                return recursoBase;
+              }
+            }
+            
+            // Si NO es temp_id, primero buscar en apusCalculados (datos calculados del frontend)
+            // Solo hacer query al backend si no se encuentra en apusCalculados
+            let subpartidaApu: any = null;
+            
+            // Buscar en apusCalculados primero
+            if (apusCalculados && r.id_partida_subpartida) {
+              const apuSubpartidaCalculado = apusCalculados.find(apu => apu.id_partida === r.id_partida_subpartida);
+              if (apuSubpartidaCalculado) {
+                console.log(`[DetallePartidaPanel] ✅ APU de subpartida encontrado en datos calculados: ${apuSubpartidaCalculado.recursos?.length || 0} recursos`);
+                subpartidaApu = apuSubpartidaCalculado;
+              }
+            }
+            
+            // Si no se encontró en apusCalculados, hacer query al backend
+            if (!subpartidaApu) {
+              try {
+                console.log(`[DetallePartidaPanel] 🔍 Cargando APU de subpartida desde backend: ${r.id_partida_subpartida}`);
+                const subpartidaApuResponse = await executeQuery<{ getApuByPartida: any }>(
+                  GET_APU_BY_PARTIDA_QUERY,
+                  { id_partida: r.id_partida_subpartida }
+                );
 
-              if (subpartidaApuResponse?.getApuByPartida) {
-                const subpartidaApu = subpartidaApuResponse.getApuByPartida;
+                if (subpartidaApuResponse?.getApuByPartida) {
+                  subpartidaApu = subpartidaApuResponse.getApuByPartida;
+                  console.log(`[DetallePartidaPanel] ✅ APU de subpartida cargado desde backend: ${subpartidaApu.recursos?.length || 0} recursos`);
+                }
+              } catch (error) {
+                console.error(`[DetallePartidaPanel] ❌ Error al cargar APU de subpartida ${r.id_partida_subpartida}:`, error);
+              }
+            }
+
+            if (subpartidaApu) {
 
                 // Convertir recursos del APU de la subpartida a RecursoAPUEditable
                 const recursosSubpartida: RecursoAPUEditable[] = (subpartidaApu.recursos || []).map((sr: any) => {
@@ -282,6 +376,11 @@ export default function DetallePartidaPanel({
                 recursoBase.jornadaSubpartida = subpartidaApu.jornada || 8;
 
                 // Obtener la partida subpartida para obtener su id_partida_padre (que es el id_partida_original)
+                // Si tenemos apusCalculados, buscar la partida en la estructura calculada
+                let partidaSubpartida: any = null;
+                
+                // Buscar en estructura calculada si está disponible (se pasa desde EstructuraPresupuestoEditor)
+                // Por ahora, intentar obtener desde el backend si es necesario
                 try {
                   const partidaSubpartidaResponse = await executeQuery<{ getPartida: any }>(
                     GET_PARTIDA_QUERY,
@@ -289,24 +388,25 @@ export default function DetallePartidaPanel({
                   );
 
                   if (partidaSubpartidaResponse?.getPartida) {
-                    const partidaSubpartida = partidaSubpartidaResponse.getPartida;
-                    // El id_partida_original es el id_partida_padre de la partida subpartida
-                    recursoBase.id_partida_original = partidaSubpartida.id_partida_padre || id_partida || undefined;
-                    // Usar la descripción de la partida subpartida (que es la descripción editada guardada)
-                    if (partidaSubpartida.descripcion) {
-                      recursoBase.descripcion = partidaSubpartida.descripcion;
-                    }
-                  } else {
-                    // Si no se encuentra, usar el id_partida actual como referencia
-                    recursoBase.id_partida_original = id_partida || undefined;
+                    partidaSubpartida = partidaSubpartidaResponse.getPartida;
                   }
                 } catch (error) {
-                  // Si hay error, usar el id_partida actual como referencia
+                  // Si hay error, continuar sin partidaSubpartida
+                }
+                
+                if (partidaSubpartida) {
+                  // El id_partida_original es el id_partida_padre de la partida subpartida
+                  recursoBase.id_partida_original = partidaSubpartida.id_partida_padre || id_partida || undefined;
+                  // Usar la descripción de la partida subpartida (que es la descripción editada guardada)
+                  if (partidaSubpartida.descripcion) {
+                    recursoBase.descripcion = partidaSubpartida.descripcion;
+                  }
+                } else {
+                  // Si no se encuentra, usar el id_partida actual como referencia
                   recursoBase.id_partida_original = id_partida || undefined;
                 }
-              }
-            } catch (error) {
-              // Error silencioso al cargar APU de subpartida
+            } else {
+              console.warn(`[DetallePartidaPanel] ⚠️ No se encontró APU para subpartida: ${r.id_partida_subpartida}`);
             }
           }
 
@@ -339,7 +439,13 @@ export default function DetallePartidaPanel({
       });
       setHasChanges(false);
     }
-  }, [apuData, id_partida, isLoadingApu]);
+  }, [
+    apuData, 
+    apuCalculado, // Incluir apuCalculado en dependencias para que se actualice cuando cambie
+    apusCalculados, // Incluir apusCalculados para que se actualicen las subpartidas cuando cambien
+    id_partida, 
+    isLoadingApu
+  ]);
 
   // Inicializar metrado y unidad_medida cuando cambia la partida
   useEffect(() => {
@@ -796,6 +902,13 @@ export default function DetallePartidaPanel({
     setJornadaInput(String(valoresOriginales.jornada));
     setRecursosEditables(JSON.parse(JSON.stringify(valoresOriginales.recursos)));
     setHasChanges(false);
+    
+    // Restaurar metrado si hay cambios pendientes
+    if (hasPartidaChanges && partida) {
+      setMetradoInput(String(partida.metrado));
+      setHasPartidaChanges(false);
+    }
+    
     toast.success('Cambios cancelados');
   };
 
@@ -1022,20 +1135,20 @@ export default function DetallePartidaPanel({
   }, [subPartidaParaActualizar, recursosEditables, onLimpiarSubPartidaParaActualizar]);
 
   // Handler para actualizar metrado de la partida
+  // NOTA: Ya no se llama automáticamente en onBlur, se guarda con "Guardar Cambios APU"
+  // Mantenido por compatibilidad pero el flujo principal es a través de handleGuardarCambios
   const handleActualizarMetrado = async (nuevoMetrado: number) => {
     if (!partida || !id_partida || esPartidaNoGuardada) return;
 
     try {
+      // El frontend calculará parcial_partida automáticamente, no es necesario enviarlo
       await updatePartida.mutateAsync({
         id_partida: id_partida,
         metrado: nuevoMetrado,
-        parcial_partida: nuevoMetrado * partida.precio_unitario,
       });
       setHasPartidaChanges(false);
-      // Invalidar y refetch query de estructura para actualizar la tabla principal
-      // El backend recalcula totales automáticamente
-      await queryClient.invalidateQueries({ queryKey: ['estructura-presupuesto', id_presupuesto] });
-      await queryClient.refetchQueries({ queryKey: ['estructura-presupuesto', id_presupuesto] });
+      // Invalidar query de estructura para actualizar la tabla principal
+      queryClient.invalidateQueries({ queryKey: ['estructura-presupuesto', id_presupuesto] });
     } catch (error) {
       // El toast de error ya se muestra en el hook
       // Restaurar valor original en caso de error
@@ -1072,7 +1185,11 @@ export default function DetallePartidaPanel({
       return;
     }
 
-    if (!hasChanges) {
+    // Verificar si hay cambios en recursos o en partida (metrado/unidad)
+    const hayCambiosRecursos = hasChanges;
+    const hayCambiosPartida = hasPartidaChanges;
+    
+    if (!hayCambiosRecursos && !hayCambiosPartida) {
       toast('No hay cambios para guardar', { icon: 'ℹ️' });
       return;
     }
@@ -1163,6 +1280,24 @@ export default function DetallePartidaPanel({
       if (onGuardandoCambios) {
         onGuardandoCambios(true);
       }
+
+      // Guardar metrado si hay cambios pendientes
+      if (hayCambiosPartida && partida && id_partida && !esPartidaNoGuardada) {
+        const nuevoMetrado = parseFloat(metradoInput);
+        if (!isNaN(nuevoMetrado) && nuevoMetrado >= 0 && nuevoMetrado !== partida.metrado) {
+          try {
+            // El frontend calculará parcial_partida automáticamente, no es necesario enviarlo
+            await updatePartida.mutateAsync({
+              id_partida: id_partida,
+              metrado: nuevoMetrado,
+            });
+            setHasPartidaChanges(false);
+          } catch (error) {
+            console.error('Error al actualizar metrado:', error);
+            // Continuar con el guardado de recursos aunque falle el metrado
+          }
+        }
+      }
       const recursosInput: RecursoApuInput[] = recursosEditables
         .filter(r => (r.recurso_id && r.descripcion) || r.esSubpartida)
         .map((r, index) => {
@@ -1213,9 +1348,22 @@ export default function DetallePartidaPanel({
         r => r.esSubpartida && r.id_partida_subpartida?.startsWith('temp_')
       );
 
+      console.log(`[DetallePartidaPanel] 💾 Guardando cambios APU - Subpartidas nuevas detectadas: ${subpartidasNuevas.length}`);
+      subpartidasNuevas.forEach((sp, idx) => {
+        console.log(`[DetallePartidaPanel] 📦 Subpartida ${idx + 1}:`, {
+          temp_id: sp.id_partida_subpartida,
+          descripcion: sp.descripcion,
+          recursosCount: sp.recursosSubpartida?.length || 0,
+          rendimiento: sp.rendimientoSubpartida,
+          jornada: sp.jornadaSubpartida,
+          precio_unitario: sp.precio_unitario_subpartida,
+        });
+      });
+
       const mapeoTempIdARealId = new Map<string, string>();
 
       if (subpartidasNuevas.length > 0 && id_partida && id_presupuesto && id_proyecto) {
+        console.log(`[DetallePartidaPanel] 🔧 Creando ${subpartidasNuevas.length} subpartidas nuevas...`);
         // Obtener partida completa para obtener id_titulo y nivel_partida
         let partidaCompleta: any = null;
         try {
@@ -1278,22 +1426,33 @@ export default function DetallePartidaPanel({
         }));
 
         // Crear partidas subpartidas y sus APUs
+        console.log(`[DetallePartidaPanel] 🚀 Enviando mutación para crear ${subpartidasParaCrear.length} subpartidas...`);
+        const tiempoCreacionInicio = performance.now();
         const resultado = await executeMutation<{ crearPartidasSubpartidasYAPUs: { mapeo: Array<{ temp_id: string; id_partida_real: string }> } }>(
           CREAR_PARTIDAS_SUBPARTIDAS_Y_APUS_MUTATION,
           { subpartidas: subpartidasParaCrear }
         );
+        const tiempoCreacionTotal = performance.now() - tiempoCreacionInicio;
+        console.log(`[DetallePartidaPanel] ⏱️ Creación de subpartidas completada: ${tiempoCreacionTotal.toFixed(2)}ms`);
 
         // Crear mapeo de temp_id -> id_partida_real
+        console.log(`[DetallePartidaPanel] 🔄 Mapeando temp_id -> id_partida_real:`);
         resultado.crearPartidasSubpartidasYAPUs.mapeo.forEach(m => {
           mapeoTempIdARealId.set(m.temp_id, m.id_partida_real);
+          console.log(`[DetallePartidaPanel]   ${m.temp_id} -> ${m.id_partida_real}`);
         });
 
         // Actualizar recursos editables con IDs reales
+        let recursosActualizados = 0;
         recursosEditables.forEach(recurso => {
           if (recurso.esSubpartida && recurso.id_partida_subpartida && mapeoTempIdARealId.has(recurso.id_partida_subpartida)) {
-            recurso.id_partida_subpartida = mapeoTempIdARealId.get(recurso.id_partida_subpartida)!;
+            const idReal = mapeoTempIdARealId.get(recurso.id_partida_subpartida)!;
+            console.log(`[DetallePartidaPanel] ✅ Actualizando recurso subpartida: ${recurso.id_partida_subpartida} -> ${idReal}`);
+            recurso.id_partida_subpartida = idReal;
+            recursosActualizados++;
           }
         });
+        console.log(`[DetallePartidaPanel] ✅ ${recursosActualizados} recursos actualizados con IDs reales`);
 
         // Invalidar queries para refrescar datos
         queryClient.invalidateQueries({ queryKey: ['apu'] });
@@ -1845,16 +2004,44 @@ export default function DetallePartidaPanel({
       }
 
       setHasChanges(false);
+      setHasPartidaChanges(false);
 
-      // Invalidar y refetch query de estructura del presupuesto para actualizar totales
-      // El backend recalcula totales de títulos y presupuesto automáticamente
       if (id_presupuesto) {
-        // Pequeño delay para dar tiempo al backend de recalcular totales
+        // Invalidar query para que React Query refetch automáticamente
+        // El hook useEstructuraPresupuesto recalculará todo con los precios compartidos actualizados
+        queryClient.invalidateQueries({ queryKey: ['estructura-presupuesto', id_presupuesto] });
+        
+        // Esperar un momento para que React Query procese la invalidación
+        // y luego hacer refetch explícito para obtener los valores calculados por el hook
         await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Refetch usando fetchQuery que respeta el hook y sus cálculos
+        const estructuraCalculada = await queryClient.fetchQuery<import('@/hooks/usePresupuestos').EstructuraPresupuesto | null>({
+          queryKey: ['estructura-presupuesto', id_presupuesto],
+        });
+        
+        // El hook ya calculó parcial_presupuesto, monto_igv, monto_utilidad y total_presupuesto
+        // Solo tomamos esos valores que ya están calculados
+        if (estructuraCalculada?.presupuesto) {
+          const parcialPresupuesto = estructuraCalculada.presupuesto.parcial_presupuesto || 0;
+          const montoIGV = estructuraCalculada.presupuesto.monto_igv || 0;
+          const montoUtilidad = estructuraCalculada.presupuesto.monto_utilidad || 0;
+          const totalPresupuesto = estructuraCalculada.presupuesto.total_presupuesto || 0;
 
-        // Invalidar y refetch explícito para asegurar que se muestren los totales actualizados
-        await queryClient.invalidateQueries({ queryKey: ['estructura-presupuesto', id_presupuesto] });
-        await queryClient.refetchQueries({ queryKey: ['estructura-presupuesto', id_presupuesto] });
+          // Guardar totales en el backend para uso en otras partes de la app
+          try {
+            await updatePresupuesto.mutateAsync({
+              id_presupuesto: id_presupuesto,
+              parcial_presupuesto: parcialPresupuesto,
+              monto_igv: montoIGV,
+              monto_utilidad: montoUtilidad,
+              total_presupuesto: totalPresupuesto
+            });
+          } catch (error) {
+            console.error('Error al guardar totales del presupuesto:', error);
+            // No mostrar error al usuario, es una operación secundaria
+          }
+        }
       }
 
       // Mostrar un solo toast de éxito
@@ -2029,7 +2216,9 @@ export default function DetallePartidaPanel({
                       setMetradoInput(String(partida!.metrado));
                       setHasPartidaChanges(false);
                     } else if (numValue !== partida!.metrado) {
-                      handleActualizarMetrado(numValue);
+                      // Solo marcar que hay cambios, no guardar automáticamente
+                      // Se guardará cuando se presione "Guardar Cambios APU"
+                      setHasPartidaChanges(true);
                     } else {
                       setHasPartidaChanges(false);
                     }
@@ -2283,6 +2472,13 @@ export default function DetallePartidaPanel({
                             onClick={recurso.esSubpartida ? () => {
                               // Abrir modal con la subpartida (para ver en modo lectura o editar en modo edición)
                               if (onEditarSubPartida && recurso.id_partida_subpartida) {
+                                console.log(`[DetallePartidaPanel] 🖱️ Clic en subpartida:`, {
+                                  id_partida_subpartida: recurso.id_partida_subpartida,
+                                  recursosCount: recurso.recursosSubpartida?.length || 0,
+                                  id_partida_original: recurso.id_partida_original,
+                                  rendimiento: recurso.rendimientoSubpartida,
+                                  jornada: recurso.jornadaSubpartida,
+                                });
                                 // Pasar TODOS los datos guardados: recursos, id_partida_original, rendimiento, jornada, descripcion
                                 onEditarSubPartida(
                                   recurso.id_partida_subpartida,
@@ -2292,6 +2488,12 @@ export default function DetallePartidaPanel({
                                   recurso.jornadaSubpartida,
                                   recurso.descripcion
                                 );
+                              } else {
+                                console.warn(`[DetallePartidaPanel] ⚠️ No se puede editar subpartida: falta id_partida_subpartida o callback`, {
+                                  tieneCallback: !!onEditarSubPartida,
+                                  tieneId: !!recurso.id_partida_subpartida,
+                                  id_partida_subpartida: recurso.id_partida_subpartida,
+                                });
                               }
                             } : undefined}
                             title={recurso.esSubpartida ? (modoReal === 'edicion' ? 'Clic para editar subpartida' : 'Clic para ver subpartida') : ''}
@@ -2597,7 +2799,7 @@ export default function DetallePartidaPanel({
             <div className="flex-1" />
             <button
               onClick={handleCancelarCambios}
-              disabled={!hasPartida || isLoading || !hasChanges || esPartidaNoGuardada || !valoresOriginales}
+              disabled={!hasPartida || isLoading || (!hasChanges && !hasPartidaChanges) || esPartidaNoGuardada || !valoresOriginales}
               className="flex items-center gap-1.5 text-xs h-6 px-2 rounded-lg bg-[var(--background)]/50 hover:bg-[var(--background)]/70 text-[var(--text-secondary)] hover:text-[var(--text-primary)] shadow-sm hover:shadow transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
               title="Cancelar cambios y restaurar valores originales"
             >
@@ -2606,9 +2808,9 @@ export default function DetallePartidaPanel({
             </button>
             <button
               onClick={handleGuardarCambios}
-              disabled={!hasPartida || isLoading || !hasChanges || esPartidaNoGuardada}
+              disabled={!hasPartida || isLoading || (!hasChanges && !hasPartidaChanges) || esPartidaNoGuardada}
               className="flex items-center gap-1.5 text-xs h-6 px-2 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 shadow-sm hover:shadow transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-              title={esPartidaNoGuardada ? "Guarde la partida antes de agregar recursos al APU" : undefined}
+              title={esPartidaNoGuardada ? "Guarde la partida antes de agregar recursos al APU" : (!hasChanges && !hasPartidaChanges) ? "No hay cambios para guardar" : undefined}
             >
               {isLoading ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
